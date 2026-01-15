@@ -1,0 +1,28 @@
+@using Microsoft.AspNetCore.Components.Web
+
+@if (IsOpen)
+{
+    <div class="app-modal-backdrop" @onclick="OnBackdropClicked">
+        <div class="app-modal-dialog" @onclick:stopPropagation>
+            @ChildContent
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public RenderFragment ChildContent { get; set; }
+
+    [Parameter] public bool CloseOnBackdropClick { get; set; } = true;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private async Task OnBackdropClicked()
+    {
+        if (!CloseOnBackdropClick)
+        {
+            return;
+        }
+
+        await OnClose.InvokeAsync();
+    }
+}

@@ -1,0 +1,243 @@
+@page "/insight"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@layout MainLayout
+@inject DatabaseService DbService
+@inject IJSRuntime JS
+@inject NotificationService NotificationService
+
+<div class="insights-container">
+    <div class="insights-header">
+        <h1>Insights</h1>
+        <p>View detailed analytics and performance metrics</p>
+    </div>
+
+    <NotificationArea />
+
+    <div class="insights-grid">
+        <!-- Revenue Overview -->
+        <div class="insight-card">
+            <div class="card-header">
+                <i class="bi bi-graph-up"></i>
+                <h2>Revenue Overview</h2>
+            </div>
+            <div class="card-content">
+                <div class="metric">
+                    <span class="label">Total Revenue</span>
+                    <span class="value">₱@TotalRevenue.ToString("N2")</span>
+                    <span class="change positive">↑ 12.5%</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Monthly Average</span>
+                    <span class="value">₱@MonthlyAverage.ToString("N2")</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Customer Metrics -->
+        <div class="insight-card">
+            <div class="card-header">
+                <i class="bi bi-people"></i>
+                <h2>Customer Metrics</h2>
+            </div>
+            <div class="card-content">
+                <div class="metric">
+                    <span class="label">Total Customers</span>
+                    <span class="value">@TotalCustomers</span>
+                    <span class="change positive">↑ 8.2%</span>
+                </div>
+                <div class="metric">
+                    <span class="label">New This Month</span>
+                    <span class="value">@NewCustomersThisMonth</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Date Filter -->
+    <div class="chart-filter-section">
+        <div class="filter-group">
+            <label>From:</label>
+            <input type="date" class="form-input" @bind="FilterFromDate" @bind:event="onchange" @bind:after="OnDateFilterChanged" />
+        </div>
+        <div class="filter-group">
+            <label>To:</label>
+            <input type="date" class="form-input" @bind="FilterToDate" @bind:event="onchange" @bind:after="OnDateFilterChanged" />
+        </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div class="charts-section">
+        <!-- Sales Chart -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2>Sales Trend</h2>
+            </div>
+            <div id="salesChart" style="width: 100%; height: 400px;"></div>
+            <div class="chart-description">
+                <p>Track your sales performance over time. This chart displays the total revenue from both walk-in customers and booking transactions. Use the date filter to analyze trends across different time periods and identify peak sales periods.</p>
+            </div>
+        </div>
+
+        <!-- Customer Chart -->
+        <div class="chart-card">
+            <div class="chart-header">
+                <h2>Customer Growth</h2>
+            </div>
+            <div id="customerChart" style="width: 100%; height: 400px;"></div>
+            <div class="chart-description">
+                <p>Monitor your customer base growth and trends. This chart shows the number of unique customers over time, helping you understand customer acquisition patterns and identify growth opportunities for your business.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<WalkInTransaction> AllWalkInTransactions = new();
+    private List<hair.Models.Booking> AllBookings = new();
+    private int TotalCustomers = 0;
+    private decimal TotalRevenue = 0;
+    private decimal MonthlyAverage = 0;
+    private int NewCustomersThisMonth = 0;
+    private DateTime FilterFromDate = DateTime.Today.AddMonths(-1);
+    private DateTime FilterToDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Load all transactions and bookings
+            AllWalkInTransactions = await DbService.GetWalkInTransactionsAsync();
+            AllBookings = await DbService.GetBookingsAsync();
+
+            // Calculate metrics
+            CalculateMetrics();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading insights: {ex.Message}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await InitializeCharts();
+        }
+    }
+
+    private void CalculateMetrics()
+    {
+        // Total Revenue - sum of all walk-in and paid booking transactions
+        decimal walkInRevenue = AllWalkInTransactions.Sum(w => w.TotalAmount);
+        decimal paidBookingRevenue = AllBookings
+            .Where(b => b.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+            .Sum(b => b.TotalAmount);
+        TotalRevenue = walkInRevenue + paidBookingRevenue;
+
+        // Monthly Average - total revenue divided by number of months with data
+        var oldestTransaction = AllWalkInTransactions.OrderBy(w => w.ServiceDate).FirstOrDefault();
+        var oldestBooking = AllBookings.OrderBy(b => b.CreatedDate).FirstOrDefault();
+        
+        if (oldestTransaction != null || oldestBooking != null)
+        {
+            var oldestDate = oldestTransaction?.ServiceDate ?? oldestBooking?.CreatedDate ?? DateTime.Now;
+            int monthsWithData = Math.Max(1, (int)((DateTime.Now - oldestDate).TotalDays / 30));
+            MonthlyAverage = TotalRevenue / monthsWithData;
+        }
+
+        // Total Customers - count of unique customers from walk-in transactions
+        TotalCustomers = AllWalkInTransactions.Select(w => w.CustomerName).Distinct().Count();
+
+        // New Customers This Month
+        var thisMonth = DateTime.Now.Month;
+        var thisYear = DateTime.Now.Year;
+        NewCustomersThisMonth = AllWalkInTransactions
+            .Where(w => w.ServiceDate.Month == thisMonth && w.ServiceDate.Year == thisYear)
+            .Select(w => w.CustomerName)
+            .Distinct()
+            .Count();
+    }
+
+    private async Task InitializeCharts()
+    {
+        // Get daily data for the selected date range
+        var chartData = GetChartData();
+        
+        // Initialize Sales Chart
+        await InitializeSalesChart(chartData);
+        
+        // Initialize Customer Chart
+        await InitializeCustomerChart(chartData);
+    }
+
+    private List<(string Date, decimal Sales, int Customers)> GetChartData()
+    {
+        var data = new List<(string Date, decimal Sales, int Customers)>();
+        int totalDays = (int)(FilterToDate - FilterFromDate).TotalDays + 1;
+
+        for (int i = 0; i < totalDays; i++)
+        {
+            var date = FilterFromDate.AddDays(i);
+            var dateString = date.ToString("MMM dd");
+
+            // Sales for this day
+            decimal daySales = AllWalkInTransactions
+                .Where(w => w.ServiceDate.Date == date.Date)
+                .Sum(w => w.TotalAmount);
+            
+            daySales += AllBookings
+                .Where(b => b.CreatedDate.Date == date.Date && b.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                .Sum(b => b.TotalAmount);
+
+            // Customers for this day
+            int dayCustomers = AllWalkInTransactions
+                .Where(w => w.ServiceDate.Date == date.Date)
+                .Select(w => w.CustomerName)
+                .Distinct()
+                .Count();
+
+            data.Add((dateString, daySales, dayCustomers));
+        }
+
+        return data;
+    }
+
+    private async Task InitializeSalesChart(List<(string Date, decimal Sales, int Customers)> chartData)
+    {
+        var dates = chartData.Select(d => d.Date).ToList();
+        var salesData = chartData.Select(d => (int)d.Sales).ToList();
+
+        try
+        {
+            await JS.InvokeVoidAsync("initSalesChart", dates, salesData);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error initializing sales chart: {ex.Message}");
+        }
+    }
+
+    private async Task InitializeCustomerChart(List<(string Date, decimal Sales, int Customers)> chartData)
+    {
+        var dates = chartData.Select(d => d.Date).ToList();
+        var customerData = chartData.Select(d => d.Customers).ToList();
+
+        try
+        {
+            await JS.InvokeVoidAsync("initCustomerChart", dates, customerData);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error initializing customer chart: {ex.Message}");
+        }
+    }
+
+    private async Task OnDateFilterChanged()
+    {
+        await InitializeCharts();
+    }
+}

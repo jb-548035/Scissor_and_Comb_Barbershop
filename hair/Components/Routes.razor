@@ -1,0 +1,11 @@
+﻿<Router AppAssembly="@typeof(MauiProgram).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(Layout.LoginLayout)">
+            <p>Page not found. Redirecting to login...</p>
+        </LayoutView>
+    </NotFound>
+</Router>

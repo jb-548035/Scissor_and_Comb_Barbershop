@@ -1,0 +1,608 @@
+@page "/walkin"
+@using hair.Services
+@using hair.Components.Layout
+@using hair.Models
+@layout MainLayout
+@inject NavigationManager Navigation
+@inject AuthStateService AuthStateService
+@inject NotificationService NotificationService
+@inject HybridDatabaseService _dbService
+
+<link rel="stylesheet" href="./Shared/ActionButtons.razor.css" />
+
+<div class="customers-container">
+    <div class="customers-header">
+        <h1>Walk-In</h1>
+        <p>Manage walk-in customers and transactions</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="customers-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search name or service..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+        <button class="btn-primary" @onclick="ShowForm">
+            <i class="bi bi-plus-circle"></i> Add Customer
+        </button>
+    </div>
+
+    <div class="walkin-tabs-container">
+        <div class="walkin-tabs">
+            <button class="tab-btn @(IsShowingAllDates ? "active" : "")" @onclick="ShowAllDates">All</button>
+            <div class="date-range-filter-inline">
+                <div class="filter-group-inline">
+                    <label>From:</label>
+                    <input type="date" class="form-input-inline" @bind="FilterFromDate" @bind:event="onchange" />
+                </div>
+                <div class="filter-group-inline">
+                    <label>To:</label>
+                    <input type="date" class="form-input-inline" @bind="FilterToDate" @bind:event="onchange" />
+                </div>
+                <button class="btn-reset-inline" @onclick="ApplyDateFilter">Apply</button>
+            </div>
+        </div>
+        
+        <div class="pagination-filter">
+            <label>Show:</label>
+            <select @bind="ItemsPerPage" @bind:event="onchange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Modal Overlay -->
+    @if (IsFormVisible)
+    {
+        <div class="modal-overlay">
+            <div class="modal-content">
+                <div class="form-header">
+                    <h2>Add Walk-in Customer</h2>
+                    <button class="close-btn" @onclick="HideForm">&times;</button>
+                </div>
+
+                <div class="form-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Customer Name</label>
+                        <input type="text" class="form-input" @bind="NewWalkIn.CustomerName" placeholder="Enter customer name" />
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Service Type</label>
+                        <select class="form-input" @bind="SelectedServiceId" @bind:after="OnServiceChanged">
+                            <option value="0">-- select --</option>
+                            <option value="1">Haircut</option>
+                            <option value="2">Haircut + Dye</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Barber</label>
+                        <select class="form-input" @bind="SelectedBarberId" @bind:event="onchange">
+                            <option value="0">-- select --</option>
+                            @foreach (var barber in Barbers.Where(b => b.IsActive))
+                            {
+                                <option value="@barber.BarberId">@barber.FullName</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Total Price (₱)</label>
+                        <input type="number" class="form-input" readonly value="@NewWalkIn.TotalPrice.ToString("0.##")" placeholder="0.00" />
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn-save" @onclick="SaveWalkIn">Save Customer</button>
+                    <button class="btn-cancel" @onclick="HideForm">Cancel</button>
+                </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="transactions-section">
+        <h2>Completed Transactions</h2>
+        
+        <div class="transactions-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Customer Name</th>
+                        <th>Service Type</th>
+                        <th>Barber</th>
+                        <th>Total Price (₱)</th>
+                        <th>Date & Time</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in PagedTransactions)
+                    {
+                        <tr>
+                            <td>
+                                <div class="customer-info">
+                                    <div class="customer-avatar">@item.CustomerName.FirstOrDefault()</div>
+                                    <span>@item.CustomerName</span>
+                                </div>
+                            </td>
+                            <td>@item.ServiceType</td>
+                            <td>@item.BarberName</td>
+                            <td class="price">₱@item.TotalPrice.ToString("0.##")</td>
+                            <td>@item.DateTime</td>
+                            <td><span class="status-badge @GetStatusClass(item.PaymentStatus)">@item.PaymentStatus</span></td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn primary" title="View" @onclick="() => OpenView(item)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn danger" title="Cancel" disabled="@(item.PaymentStatus.Equals("Cancelled", StringComparison.OrdinalIgnoreCase))" @onclick="() => OpenCancel(item)">
+                                        <i class="bi bi-x-circle"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pagination">
+            <div>Showing @((PageIndex - 1) * ItemsPerPage + 1) - @(Math.Min(PageIndex * ItemsPerPage, FinalCustomerList.Count())) of @FinalCustomerList.Count()</div>
+            <div>
+                <button class="btn-pagination" @onclick="PrevPage" disabled="@(PageIndex==1)">← Prev</button>
+                <button class="btn-pagination" @onclick="NextPage" disabled="@(PageIndex*ItemsPerPage >= FinalCustomerList.Count())">Next →</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<AppModal IsOpen="@ShowViewModal" OnClose="CloseView">
+    <div class="action-modal">
+        <div class="action-modal__header">
+            <div class="action-modal__title">Walk-In Details</div>
+            <button class="icon-btn" @onclick="CloseView" type="button" title="Close">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+
+        <div class="action-modal__body">
+            @if (ViewingItem != null)
+            {
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-item__label">Customer</div>
+                        <div class="detail-item__value">@ViewingItem.CustomerName</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item__label">Service</div>
+                        <div class="detail-item__value">@ViewingItem.ServiceType</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item__label">Barber</div>
+                        <div class="detail-item__value">@ViewingItem.BarberName</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item__label">Total</div>
+                        <div class="detail-item__value">₱@ViewingItem.TotalPrice.ToString("0.##")</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item__label">Date & Time</div>
+                        <div class="detail-item__value">@ViewingItem.DateTime</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-item__label">Status</div>
+                        <div class="detail-item__value">@ViewingItem.PaymentStatus</div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="action-modal__footer">
+            <button class="btn-cancel" @onclick="CloseView" type="button">Close</button>
+        </div>
+    </div>
+</AppModal>
+
+<AppModal IsOpen="@ShowCancelModal" OnClose="CloseCancel">
+    <div class="action-modal">
+        <div class="action-modal__header">
+            <div class="action-modal__title">Cancel Walk-In</div>
+            <button class="icon-btn" @onclick="CloseCancel" type="button" title="Close">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+
+        <div class="action-modal__body">
+            @if (CancelItem != null)
+            {
+                <div style="color:#6b7280; font-size:14px;">
+                    Are you sure you want to cancel this walk-in transaction for
+                    <strong>@CancelItem.CustomerName</strong>?
+                </div>
+            }
+        </div>
+
+        <div class="action-modal__footer">
+            <button class="btn-cancel" @onclick="CloseCancel" type="button">Back</button>
+            <button class="btn-save" @onclick="ConfirmCancel" type="button">Confirm</button>
+        </div>
+    </div>
+</AppModal>
+
+@code {
+    // Database service is injected at the top of the file
+    private bool IsFormVisible = false;
+    private List<Service> Services = new();
+    private List<Models.Barber> Barbers = new();
+    private List<WalkInTransaction> WalkInTransactions = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+
+    // Form fields
+    private TransactionRecord NewWalkIn = new TransactionRecord
+    {
+        AddOns = "None",
+        PaymentStatus = "Paid"
+    };
+    private int SelectedServiceId = 0;
+    private int SelectedBarberId = 0;
+
+    // Pagination
+    private int ItemsPerPage = 10;
+    private int PageIndex = 1;
+
+    // Search and filtering
+    private string SearchTerm = string.Empty;
+    private DateTime FilterFromDate = DateTime.Today;
+    private DateTime FilterToDate = DateTime.Today;
+    private bool IsShowingAllDates = true;
+
+    private bool ShowViewModal;
+    private TransactionRecord? ViewingItem;
+
+    private bool ShowCancelModal;
+    private TransactionRecord? CancelItem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Starting initialization...");
+            
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                System.Diagnostics.Debug.WriteLine("[WalkIn] ERROR: _dbService is null");
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Testing connection...");
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] Connection test result: {isConnected}");
+            
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Loading services...");
+            // Load services
+            Services = await _dbService.GetServicesAsync();
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] Loaded {Services.Count} services");
+            
+            if (Services.Count == 0)
+            {
+                ErrorMessage = "No services found in database.";
+            }
+
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Loading barbers...");
+            // Load barbers
+            Barbers = await _dbService.GetBarbersAsync();
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] Loaded {Barbers.Count} barbers");
+            
+            if (Barbers.Count == 0)
+            {
+                ErrorMessage = "No barbers found in database.";
+            }
+
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Loading walk-in transactions...");
+            // Load walk-in transactions
+            WalkInTransactions = await _dbService.GetWalkInTransactionsAsync();
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] Loaded {WalkInTransactions.Count} transactions");
+            
+            System.Diagnostics.Debug.WriteLine("[WalkIn] Initialization complete!");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] ERROR: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[WalkIn] Stack trace: {ex.StackTrace}");
+        }
+    }
+
+    void ShowForm()
+    {
+        IsFormVisible = true;
+        NotificationService.ShowInfo("Add walk-in customer form opened.");
+    }
+
+    void HideForm()
+    {
+        IsFormVisible = false;
+        ResetForm();
+        NotificationService.ShowInfo("Add walk-in customer cancelled.", autoClearMs: 3000);
+    }
+
+    void ResetForm()
+    {
+        NewWalkIn = new TransactionRecord { AddOns = "None", PaymentStatus = "Paid" };
+        SelectedServiceId = 0;
+        SelectedBarberId = 0;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+    }
+
+    void OnServiceChanged()
+    {
+        if (SelectedServiceId == 1)
+        {
+            NewWalkIn.ServiceType = "Haircut";
+            NewWalkIn.TotalPrice = 120;
+        }
+        else if (SelectedServiceId == 2)
+        {
+            NewWalkIn.ServiceType = "Haircut + Dye";
+            NewWalkIn.TotalPrice = 150;
+        }
+    }
+
+    async Task SaveWalkIn()
+    {
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        // Validation
+        if (string.IsNullOrWhiteSpace(NewWalkIn.CustomerName))
+        {
+            ErrorMessage = "Please enter customer name.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (SelectedServiceId <= 0)
+        {
+            ErrorMessage = "Please select a service.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (_dbService == null)
+        {
+            ErrorMessage = "Database service not initialized.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        try
+        {
+            // Validate barber selection
+            if (SelectedBarberId <= 0)
+            {
+                ErrorMessage = "Please select a barber.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            // Get current user ID
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? createdByUserId = currentUser?.UserId;
+
+            // Create walk-in transaction
+            var walkInId = await _dbService.CreateWalkInTransactionAsync(
+                customerName: NewWalkIn.CustomerName,
+                serviceId: SelectedServiceId,
+                barberId: SelectedBarberId,
+                totalAmount: (decimal)NewWalkIn.TotalPrice,
+                createdByUserId: createdByUserId
+            );
+
+            if (walkInId > 0)
+            {
+                SuccessMessage = "Walk-in customer transaction saved successfully!";
+                NotificationService.ShowSuccess(SuccessMessage);
+                
+                // Reload transactions
+                WalkInTransactions = await _dbService.GetWalkInTransactionsAsync();
+                
+                // Reset form
+                ResetForm();
+                IsFormVisible = false;
+            }
+            else if (walkInId == -1)
+            {
+                ErrorMessage = "The selected barber is not available at this time. Please choose a different barber or try again later.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+            else
+            {
+                ErrorMessage = "Failed to save transaction. Please try again.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving transaction: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+
+
+    // Get barber name from ID
+    string GetBarberName(int barberId)
+    {
+        var barber = Barbers.FirstOrDefault(b => b.BarberId == barberId);
+        return barber?.FullName ?? "Unknown";
+    }
+
+    // Get status class for badge styling
+    string GetStatusClass(string status)
+    {
+        return status switch
+        {
+            "Paid" => "paid",
+            "Pending" => "pending",
+            "Cancelled" => "cancelled",
+            _ => "pending"
+        };
+    }
+
+    // Check if date is in the selected filter range
+    bool IsDateInFilter(DateTime date)
+    {
+        if (IsShowingAllDates)
+            return true;
+        
+        return date.Date >= FilterFromDate.Date && date.Date <= FilterToDate.Date;
+    }
+
+    // Display transactions from database with filtering
+    IEnumerable<TransactionRecord> FinalCustomerList =>
+        WalkInTransactions
+            .Where(w => IsDateInFilter(w.ServiceDate))
+            .Select(w => 
+            {
+                return new TransactionRecord
+                {
+                    WalkInId = w.WalkInId,
+                    CustomerName = w.CustomerName,
+                    ServiceType = Services.FirstOrDefault(s => s.ServiceId == w.ServiceId)?.ServiceName ?? "Unknown",
+                    BarberName = GetBarberName(w.BarberId),
+                    AddOns = "None",
+                    TotalPrice = (double)w.TotalAmount,
+                    DateTime = w.ServiceDate.ToString("MM/dd/yyyy HH:mm tt"),
+                    PaymentStatus = w.Status
+                };
+            })
+            .Where(r =>
+                string.IsNullOrWhiteSpace(SearchTerm)
+                || r.CustomerName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)
+                || r.ServiceType.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(r => DateTime.ParseExact(r.DateTime, "MM/dd/yyyy HH:mm tt", null));
+
+    // Paginated transactions
+    IEnumerable<TransactionRecord> PagedTransactions =>
+        FinalCustomerList
+            .Skip((PageIndex - 1) * ItemsPerPage)
+            .Take(ItemsPerPage);
+
+    // Show all dates
+    void ShowAllDates()
+    {
+        IsShowingAllDates = true;
+        PageIndex = 1;
+        NotificationService.ShowInfo("Showing all dates.", autoClearMs: 3000);
+    }
+
+    // Apply date filter
+    void ApplyDateFilter()
+    {
+        IsShowingAllDates = false;
+        PageIndex = 1;
+        NotificationService.ShowInfo("Date filter applied.", autoClearMs: 3000);
+    }
+
+    // Pagination methods
+    void PrevPage() { if (PageIndex > 1) PageIndex--; }
+    void NextPage() { if (PageIndex * ItemsPerPage < FinalCustomerList.Count()) PageIndex++; }
+
+    private void OpenView(TransactionRecord item)
+    {
+        ViewingItem = item;
+        ShowViewModal = true;
+    }
+
+    private void CloseView()
+    {
+        ShowViewModal = false;
+        ViewingItem = null;
+    }
+
+    private void OpenCancel(TransactionRecord item)
+    {
+        CancelItem = item;
+        ShowCancelModal = true;
+    }
+
+    private void CloseCancel()
+    {
+        ShowCancelModal = false;
+        CancelItem = null;
+    }
+
+    private async Task ConfirmCancel()
+    {
+        if (CancelItem == null || _dbService == null)
+        {
+            CloseCancel();
+            return;
+        }
+
+        try
+        {
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? changedByUserId = currentUser?.UserId;
+
+            if (CancelItem.WalkInId <= 0)
+            {
+                NotificationService.ShowError("Unable to cancel: missing WalkInId.");
+                return;
+            }
+
+            var ok = await _dbService.UpdateWalkInStatusAsync(CancelItem.WalkInId, "Cancelled", changedByUserId);
+            if (!ok)
+            {
+                NotificationService.ShowError("Failed to cancel walk-in transaction.");
+                return;
+            }
+
+            WalkInTransactions = await _dbService.GetWalkInTransactionsAsync();
+            NotificationService.ShowSuccess("Walk-in transaction cancelled.");
+            CloseCancel();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error cancelling transaction: {ex.Message}");
+        }
+    }
+}

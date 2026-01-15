@@ -1,0 +1,39 @@
+@using hair.Services
+@implements IDisposable
+@inject NotificationService NotificationService
+
+@if (NotificationService.Current != null)
+{
+    <div class="app-notification @GetTypeClass(NotificationService.Current.Type)" role="alert">
+        <div class="app-notification__content">@NotificationService.Current.Message</div>
+        <button type="button" class="app-notification__close" aria-label="Close" @onclick="NotificationService.Clear">&times;</button>
+    </div>
+}
+
+@code {
+    protected override void OnInitialized()
+    {
+        NotificationService.OnChange += HandleChange;
+    }
+
+    private void HandleChange()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string GetTypeClass(NotificationType type)
+    {
+        return type switch
+        {
+            NotificationType.Success => "success",
+            NotificationType.Error => "error",
+            NotificationType.Info => "info",
+            _ => "info"
+        };
+    }
+
+    public void Dispose()
+    {
+        NotificationService.OnChange -= HandleChange;
+    }
+}

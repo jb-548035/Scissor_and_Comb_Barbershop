@@ -1,0 +1,253 @@
+@page "/setting"
+@using hair.Components.Layout
+@using hair.Services
+@using Microsoft.Maui.Networking
+@layout MainLayout
+@implements IDisposable
+@inject NotificationService NotificationService
+
+<div class="settings-container">
+    <div class="settings-header">
+        <h1>Settings</h1>
+        <p>Manage system settings and cloud synchronization</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            <i class="bi bi-exclamation-circle"></i>
+            <span>@ErrorMessage</span>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle"></i>
+            <span>@SuccessMessage</span>
+        </div>
+    }
+
+    <!-- Cloud Sync Section -->
+    <div class="settings-section">
+        <div class="section-header">
+            <h2>Cloud Synchronization</h2>
+            <p class="section-description">Backup and sync your data to the cloud</p>
+        </div>
+
+        <div class="settings-card cloud-sync-card">
+            <div class="sync-status">
+                <div class="status-indicator @(IsOnline ? "enabled" : "disabled")">
+                    <i class="bi @(IsOnline ? "bi-cloud-check" : "bi-wifi-off")"></i>
+                </div>
+                <div class="status-info">
+                    <h3>Cloud Sync Status</h3>
+                    <p>@(IsOnline ? "Connected to cloud" : "Offline - No internet connection")</p>
+                    @if (LastSyncTime != null)
+                    {
+                        <p class="sync-time">Last synced: @LastSyncTime.Value.ToString("MMM dd, yyyy hh:mm tt")</p>
+                    }
+                </div>
+            </div>
+            
+            <div class="sync-toggle">
+                <button class="btn-sync" @onclick="ManualSync" disabled="@(isSyncing || !IsOnline)">
+                    @if (isSyncing)
+                    {
+                        <span class="spinner"></span>
+                        <span>Syncing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-repeat"></i>
+                        <span>Sync Now</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+@code {
+    [Inject]
+    private NavigationManager Navigation { get; set; }
+
+    [Inject]
+    private AuthStateService AuthStateService { get; set; }
+
+    [Inject]
+    private SyncService? SyncService { get; set; }
+
+    // General Settings
+    private string BusinessName = "My Barbershop";
+    private string BusinessPhone = "";
+    private string BusinessEmail = "";
+    private string BusinessAddress = "";
+
+    // Cloud Sync Settings
+    private bool IsCloudSyncEnabled = true; // Always enabled now
+    private bool IsOnline => Connectivity.NetworkAccess == NetworkAccess.Internet;
+    private DateTime? LastSyncTime = DateTime.Now;
+
+    // UI State
+    private bool isSaving = false;
+    private bool isSyncing = false;
+    private string ErrorMessage = "";
+    private string SuccessMessage = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Check if user is Admin
+        var currentUser = AuthStateService.GetCurrentUser();
+        if (string.IsNullOrEmpty(currentUser?.Role) || 
+            !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/dashboard", true);
+            return;
+        }
+
+        // Load saved settings (in real app, load from database)
+        LoadSettings();
+        
+        // Subscribe to connectivity changes
+        Connectivity.ConnectivityChanged += OnConnectivityChanged;
+        
+        // Initial connectivity check
+        await CheckConnectivity();
+    }
+    
+    private void OnConnectivityChanged(object sender, ConnectivityChangedEventArgs e)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            await CheckConnectivity();
+            StateHasChanged();
+        });
+    }
+    
+    private async Task CheckConnectivity()
+    {
+        try
+        {
+            // Trigger UI update
+            await InvokeAsync(StateHasChanged);
+            
+            // If we're back online, trigger a sync
+            if (IsOnline)
+            {
+                await ManualSync();
+            }
+        }
+        catch
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+    
+    public void Dispose()
+    {
+        Connectivity.ConnectivityChanged -= OnConnectivityChanged;
+    }
+
+    private void LoadSettings()
+    {
+        // TODO: Load settings from database
+        // For now, using default values
+        LastSyncTime = DateTime.Now.AddHours(-2);
+    }
+
+    private async Task SaveGeneralSettings()
+    {
+        ErrorMessage = "";
+        SuccessMessage = "";
+        isSaving = true;
+
+        try
+        {
+            // TODO: Save settings to database
+            await Task.Delay(500); // Simulate save
+            
+            SuccessMessage = "Settings saved successfully!";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving settings: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task OnCloudSyncToggle()
+    {
+        // Cloud sync is now always enabled, so this method is a no-op
+        // Kept for compatibility with any existing code
+        await Task.CompletedTask;
+    }
+
+    private async Task ManualSync()
+    {
+        ErrorMessage = "";
+        SuccessMessage = "";
+        isSyncing = true;
+
+        try
+        {
+            if (SyncService == null)
+            {
+                ErrorMessage = "Sync service not available";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            if (!IsOnline)
+            {
+                ErrorMessage = "Cannot sync - no internet connection";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            // Get pending count
+            var pendingCount = await SyncService.GetPendingCountAsync();
+            
+            if (pendingCount == 0)
+            {
+                SuccessMessage = "No pending data to sync";
+                NotificationService.ShowInfo(SuccessMessage);
+                LastSyncTime = DateTime.Now;
+                return;
+            }
+
+            // Sync all pending operations
+            var (synced, failed) = await SyncService.SyncAllAsync();
+            
+            LastSyncTime = DateTime.Now;
+            
+            if (failed == 0)
+            {
+                SuccessMessage = $"Data synced to cloud successfully! ({synced} items)";
+                NotificationService.ShowSuccess(SuccessMessage);
+            }
+            else
+            {
+                SuccessMessage = $"Partially synced: {synced} succeeded, {failed} failed";
+                NotificationService.ShowInfo(SuccessMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Sync failed: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+        finally
+        {
+            isSyncing = false;
+        }
+    }
+
+
+}

@@ -1,0 +1,281 @@
+@page "/dashboard"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@layout MainLayout
+@inject DatabaseService DbService
+@inject IJSRuntime JS
+
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>Dashboard</h1>
+        <h3>Today's Overview</h3>
+    </div>
+
+    <NotificationArea />
+
+    <!-- KPI Cards -->
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-icon new-customer">
+                <i class="bi bi-person-plus-fill"></i>
+            </div>
+            <div class="kpi-content">
+                <p class="kpi-label">Customers Today</p>
+                <p class="kpi-value">@TodayCustomerCount</p>
+                <p class="kpi-change positive">↑ 12.5%</p>
+            </div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-icon total-sales">
+                <i class="bi bi-cash-coin"></i>
+            </div>
+            <div class="kpi-content">
+                <p class="kpi-label">Profit Today</p>
+                <p class="kpi-value">₱@TodaySalesAmount.ToString("0.##")</p>
+                <p class="kpi-change positive">↑ 8.2%</p>
+            </div>
+        </div>
+
+        <div class="kpi-card">
+            <div class="kpi-icon bookings">
+                <i class="bi bi-calendar-check-fill"></i>
+            </div>
+            <div class="kpi-content">
+                <p class="kpi-label">Bookings Today</p>
+                <p class="kpi-value">@TodayBookingCount</p>
+                <p class="kpi-change positive">↑ 5.3%</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-insights">
+        <div class="charts-section">
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h2>Sales Trend</h2>
+                </div>
+                <div id="salesChart" style="width: 100%; height: 360px;"></div>
+            </div>
+
+            <div class="chart-card">
+                <div class="chart-header">
+                    <h2>Customer Growth</h2>
+                </div>
+                <div id="customerChart" style="width: 100%; height: 360px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid -->
+    <div class="dashboard-grid">
+        <!-- Left Column -->
+        <div class="left-column">
+            <!-- Recent Customers -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h2>Recent Customers</h2>
+                    <a href="/walkin" class="view-all">View All →</a>
+                </div>
+                <div class="customers-list">
+                    @if (TodayWalkInTransactions.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <p>No customers today</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var transaction in TodayWalkInTransactions)
+                        {
+                            <div class="customer-item">
+                                <div class="customer-avatar">@GetInitials(transaction.CustomerName)</div>
+                                <div class="customer-details">
+                                    <p class="customer-name">@transaction.CustomerName</p>
+                                    <p class="customer-service">@GetServiceName(transaction.ServiceId)</p>
+                                </div>
+                                <p class="customer-price">₱@transaction.TotalAmount.ToString("0.##")</p>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="right-column">
+            <!-- Booking List -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h2>Todays Booking</h2>
+                    <a href="/booking" class="view-all">View All →</a>
+                </div>
+                <div class="bookings-list">
+                    @if (TodayBookings.Count == 0)
+                    {
+                        <div class="empty-state">
+                            <p>No bookings today</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var booking in TodayBookings.OrderBy(b => b.Schedule))
+                        {
+                            <div class="booking-item">
+                                <div class="booking-time">@booking.Schedule.ToString("h:mm tt")</div>
+                                <div class="booking-info">
+                                    <p class="booking-customer">@booking.CustomerName</p>
+                                    <p class="booking-service">@GetServiceName(booking.ServiceId)</p>
+                                </div>
+                                <span class="booking-status @GetStatusClass(booking.Status)">@booking.Status</span>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<WalkInTransaction> AllWalkInTransactions = new();
+    private List<hair.Models.Booking> AllBookings = new();
+    private List<WalkInTransaction> TodayWalkInTransactions = new();
+    private List<hair.Models.Booking> TodayBookings = new();
+    private List<Service> AllServices = new();
+    
+    private int TodayCustomerCount = 0;
+    private decimal TodaySalesAmount = 0;
+    private int TodayBookingCount = 0;
+
+    private DateTime FilterFromDate = DateTime.Today.AddMonths(-1);
+    private DateTime FilterToDate = DateTime.Today;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Load all services
+            AllServices = await DbService.GetServicesAsync();
+
+            // Load walk-in transactions
+            AllWalkInTransactions = await DbService.GetWalkInTransactionsAsync();
+            TodayWalkInTransactions = AllWalkInTransactions
+                .Where(w => w.ServiceDate.Date == DateTime.Today)
+                .OrderByDescending(w => w.ServiceDate)
+                .ToList();
+
+            // Load bookings
+            AllBookings = await DbService.GetBookingsAsync();
+            TodayBookings = AllBookings
+                .Where(b => b.Schedule.Date == DateTime.Today)
+                .OrderBy(b => b.Schedule)
+                .ToList();
+
+            // Calculate today's customer count and sales
+            TodayCustomerCount = TodayWalkInTransactions.Count;
+            
+            // Sales from walk-in transactions
+            decimal walkInSales = TodayWalkInTransactions.Sum(w => w.TotalAmount);
+            
+            // Sales from paid bookings
+            decimal paidBookingSales = TodayBookings
+                .Where(b => b.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                .Sum(b => b.TotalAmount);
+            
+            TodaySalesAmount = walkInSales + paidBookingSales;
+            TodayBookingCount = TodayBookings.Count;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading dashboard data: {ex.Message}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await InitializeCharts();
+        }
+    }
+
+    private async Task InitializeCharts()
+    {
+        var chartData = GetChartData();
+        await InitializeSalesChart(chartData);
+        await InitializeCustomerChart(chartData);
+    }
+
+    private List<(string Date, decimal Sales, int Customers)> GetChartData()
+    {
+        var data = new List<(string Date, decimal Sales, int Customers)>();
+        int totalDays = (int)(FilterToDate.Date - FilterFromDate.Date).TotalDays + 1;
+        if (totalDays < 1) return data;
+
+        for (int i = 0; i < totalDays; i++)
+        {
+            var date = FilterFromDate.Date.AddDays(i);
+            var dateString = date.ToString("MMM dd");
+
+            decimal daySales = AllWalkInTransactions
+                .Where(w => w.ServiceDate.Date == date)
+                .Sum(w => w.TotalAmount);
+
+            daySales += AllBookings
+                .Where(b => b.CreatedDate.Date == date && b.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+                .Sum(b => b.TotalAmount);
+
+            int dayCustomers = AllWalkInTransactions
+                .Where(w => w.ServiceDate.Date == date)
+                .Select(w => w.CustomerName)
+                .Distinct()
+                .Count();
+
+            data.Add((dateString, daySales, dayCustomers));
+        }
+
+        return data;
+    }
+
+    private async Task InitializeSalesChart(List<(string Date, decimal Sales, int Customers)> chartData)
+    {
+        var dates = chartData.Select(d => d.Date).ToList();
+        var salesData = chartData.Select(d => (int)d.Sales).ToList();
+        await JS.InvokeVoidAsync("initSalesChart", dates, salesData);
+    }
+
+    private async Task InitializeCustomerChart(List<(string Date, decimal Sales, int Customers)> chartData)
+    {
+        var dates = chartData.Select(d => d.Date).ToList();
+        var customerData = chartData.Select(d => d.Customers).ToList();
+        await JS.InvokeVoidAsync("initCustomerChart", dates, customerData);
+    }
+
+    private string GetInitials(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "?";
+        var parts = name.Split(' ');
+        if (parts.Length >= 2)
+            return $"{parts[0][0]}{parts[1][0]}".ToUpper();
+        return name.Substring(0, Math.Min(2, name.Length)).ToUpper();
+    }
+
+    private string GetServiceName(int serviceId)
+    {
+        return AllServices.FirstOrDefault(s => s.ServiceId == serviceId)?.ServiceName ?? "Unknown Service";
+    }
+
+    private string GetStatusClass(string status)
+    {
+        return status?.ToLower() switch
+        {
+            "pending" => "pending",
+            "confirmed" => "confirmed",
+            "paid" => "confirmed",
+            "cancelled" => "cancelled",
+            _ => "pending"
+        };
+    }
+}

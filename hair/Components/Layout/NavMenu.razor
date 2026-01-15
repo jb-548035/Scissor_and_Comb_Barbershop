@@ -1,0 +1,212 @@
+@using hair.Services
+@using Microsoft.AspNetCore.Components.Routing
+
+<!-- Sidebar Header -->
+<div class="sidebar-header">
+    <div class="logo">
+        <img src="images/logo.png" alt="Logo" class="logo-image" />
+        <span class="logo-text @(IsCollapsed ? "hidden" : "")">Scissor & Combs</span>
+    </div>
+</div>
+
+<!-- Navigation Menu -->
+<nav class="sidebar-nav">
+
+    <!-- MENU Section -->
+    <div class="nav-section">
+        <div class="nav-section-title @(IsCollapsed ? "hidden" : "")">MENU</div>
+
+        <div class="nav-item">
+            <button type="button" class="nav-link @(IsRouteActive("/dashboard") ? "active" : "")" @onclick='() => NavigateTo("/dashboard")'>
+                <i class="bi bi-house-door-fill"></i>
+                <span class="nav-text @(IsCollapsed ? "hidden" : "")">Dashboard</span>
+            </button>
+        </div>
+
+        <!-- Customer Dropdown -->
+        <div class="nav-item nav-dropdown">
+            <button type="button" class="nav-link dropdown-toggle @((IsRouteActive("/walkin") || IsRouteActive("/booking")) ? "active" : "")" @onclick="ToggleCustomerDropdown">
+                <i class="bi bi-people-fill"></i>
+                <span class="nav-text @(IsCollapsed ? "hidden" : "")">Customer</span>
+                <i class="bi bi-chevron-down dropdown-icon @(IsCustomerDropdownOpen ? "open" : "")"></i>
+            </button>
+
+            <div class="sidebar-dropdown-menu @((IsCustomerDropdownOpen && !IsCollapsed) ? "open" : "")" aria-hidden="@(!(IsCustomerDropdownOpen && !IsCollapsed))">
+                <div class="sidebar-dropdown-content">
+                    <button type="button" class="sidebar-dropdown-link @(IsRouteActive("/walkin") ? "active" : "")" @onclick='() => NavigateToAndCloseCustomerDropdown("/walkin")'>
+                        Walk-In
+                    </button>
+                    <button type="button" class="sidebar-dropdown-link @(IsRouteActive("/booking") ? "active" : "")" @onclick='() => NavigateToAndCloseCustomerDropdown("/booking")'>
+                        Booking
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="nav-item">
+            <button type="button" class="nav-link @(IsRouteActive("/history") ? "active" : "")" @onclick='() => NavigateTo("/history")'>
+                <i class="bi bi-clock-history"></i>
+                <span class="nav-text @(IsCollapsed ? "hidden" : "")">History</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- TOOLS Section (Admin Only) -->
+    @if (IsAdmin)
+    {
+        <div class="nav-section">
+            <div class="nav-section-title @(IsCollapsed ? "hidden" : "")">TOOLS</div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/barber") ? "active" : "")" @onclick='() => NavigateTo("/barber")'>
+                    <i class="bi bi-scissors"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Barbers</span>
+                </button>
+            </div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/services") ? "active" : "")" @onclick='() => NavigateTo("/services")'>
+                    <i class="bi bi-list-ul"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Services</span>
+                </button>
+            </div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/insight") ? "active" : "")" @onclick='() => NavigateTo("/insight")'>
+                    <i class="bi bi-box-fill"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Insights</span>
+                </button>
+            </div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/account") ? "active" : "")" @onclick='() => NavigateTo("/account")'>
+                    <i class="bi bi-graph-up-arrow"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Accounts</span>
+                </button>
+            </div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/audit-logs") ? "active" : "")" @onclick='() => NavigateTo("/audit-logs")'>
+                    <i class="bi bi-shield-check"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Audit Logs</span>
+                </button>
+            </div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/archive") ? "active" : "")" @onclick='() => NavigateTo("/archive")'>
+                    <i class="bi bi-archive"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Archive</span>
+                </button>
+            </div>
+        </div>
+    }
+
+    <!-- SUPPORT Section (Admin Only) -->
+    @if (IsAdmin)
+    {
+        <div class="nav-section">
+            <div class="nav-section-title @(IsCollapsed ? "hidden" : "")">SUPPORT</div>
+
+            <div class="nav-item">
+                <button type="button" class="nav-link @(IsRouteActive("/setting") ? "active" : "")" @onclick='() => NavigateTo("/setting")'>
+                    <i class="bi bi-gear-fill"></i>
+                    <span class="nav-text @(IsCollapsed ? "hidden" : "")">Settings</span>
+                </button>
+            </div>
+        </div>
+    }
+</nav>
+
+<!-- Sidebar Footer -->
+<div class="sidebar-footer @(IsCollapsed ? "hidden" : "")">
+    <button class="logout-button" @onclick="HandleLogout">
+        <i class="bi bi-box-arrow-right"></i>
+        <span>Log Out</span>
+    </button>
+    <p class="copyright">© 2025 Scissor & Comb</p>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnToggleSidebar { get; set; }
+    [Parameter] public bool IsCollapsed { get; set; }
+
+    [Inject] public NavigationManager Navigation { get; set; }
+    [Inject] public AuthStateService AuthStateService { get; set; }
+
+    private bool IsAdmin;
+    private bool IsCustomerDropdownOpen;
+
+    private void ToggleCustomerDropdown()
+    {
+        IsCustomerDropdownOpen = !IsCustomerDropdownOpen;
+    }
+
+    protected override void OnInitialized()
+    {
+        AuthStateService.OnAuthStateChanged += OnAuthStateChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        UpdateAdminStatus();
+    }
+
+    private void OnLocationChanged(object sender, LocationChangedEventArgs e)
+    {
+        StateHasChanged();
+    }
+
+    private void NavigateTo(string url)
+    {
+        Navigation.NavigateTo(url);
+    }
+
+    private void NavigateToAndCloseCustomerDropdown(string url)
+    {
+        IsCustomerDropdownOpen = false;
+        Navigation.NavigateTo(url);
+    }
+
+    private bool IsRouteActive(string href)
+    {
+        if (string.IsNullOrWhiteSpace(href))
+        {
+            return false;
+        }
+
+        var current = "/" + Navigation.ToBaseRelativePath(Navigation.Uri);
+        if (current == "/")
+        {
+            return href == "/";
+        }
+
+        return current.Equals(href, StringComparison.OrdinalIgnoreCase)
+            || current.StartsWith(href + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void UpdateAdminStatus()
+    {
+        var currentUser = AuthStateService.GetCurrentUser();
+
+        bool newIsAdmin =
+            currentUser != null &&
+            !string.IsNullOrWhiteSpace(currentUser.Role) &&
+            currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase);
+
+        if (newIsAdmin != IsAdmin)
+        {
+            IsAdmin = newIsAdmin;
+            StateHasChanged();
+        }
+    }
+
+    private void OnAuthStateChanged() => UpdateAdminStatus();
+
+    private void HandleLogout()
+    {
+        Navigation.NavigateTo("/login", true);
+    }
+
+    public void Dispose()
+    {
+        AuthStateService.OnAuthStateChanged -= OnAuthStateChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

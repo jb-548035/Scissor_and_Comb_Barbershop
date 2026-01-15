@@ -1,0 +1,126 @@
+﻿@inherits LayoutComponentBase
+@using hair.Services
+@inject AuthStateService AuthStateService
+@inject NavigationManager Navigation
+
+<div class="main-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar @(sidebarCollapsed ? "collapsed" : "")">
+        <NavMenu OnToggleSidebar="ToggleSidebar" IsCollapsed="sidebarCollapsed" />
+    </aside>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Navbar -->
+        <nav class="top-navbar">
+            <div class="navbar-left">
+                <button class="sidebar-toggle" @onclick="ToggleSidebar">
+                    <i class="bi bi-list"></i>
+                </button>
+            </div>
+
+            <div class="navbar-right">
+                <button class="navbar-icon" @onclick="ShowNotifications">
+                    <i class="bi bi-bell"></i>
+                </button>
+                <button class="navbar-icon" @onclick="GoToSettings">
+                    <i class="bi bi-gear"></i>
+                </button>
+                @if (currentUser != null)
+                {
+                    <div class="user-menu-container">
+                        <button type="button" class="user-profile" @onclick="ToggleUserMenu">
+                            <div class="user-avatar">@GetInitials(currentUser.FirstName, currentUser.LastName)</div>
+                            <div class="user-info">
+                                <span class="user-name">@currentUser.FirstName @currentUser.LastName</span>
+                                <span class="user-role">@currentUser.Role</span>
+                            </div>
+                        </button>
+
+                        @if (showUserMenu)
+                        {
+                            <div class="user-menu" @onclick:stopPropagation="true">
+                                <div class="user-menu-header">
+                                    <p class="user-email">@currentUser.Email</p>
+                                    <p class="user-role-label">@currentUser.Role</p>
+                                </div>
+                                <hr />
+                                <button class="user-menu-item" @onclick="GoToProfile">
+                                    <i class="bi bi-person"></i> Profile
+                                </button>
+                                <button class="user-menu-item" @onclick="GoToSettings">
+                                    <i class="bi bi-gear"></i> Settings
+                                </button>
+                                <hr />
+                                <button class="user-menu-item logout" @onclick="HandleLogout">
+                                    <i class="bi bi-box-arrow-right"></i> Logout
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </nav>
+
+        <!-- Page Content -->
+        <main class="page-content">
+            @Body
+        </main>
+    </div>
+</div>
+
+@code {
+    private bool sidebarCollapsed = false;
+    private bool showUserMenu = false;
+    private UserInfo currentUser;
+
+    protected override void OnInitialized()
+    {
+        currentUser = AuthStateService.GetCurrentUser();
+        AuthStateService.OnAuthStateChanged += StateHasChanged;
+    }
+
+    private void ToggleSidebar()
+    {
+        sidebarCollapsed = !sidebarCollapsed;
+    }
+
+    private void ToggleUserMenu()
+    {
+        showUserMenu = !showUserMenu;
+    }
+
+    private string GetInitials(string firstName, string lastName)
+    {
+        return $"{firstName.FirstOrDefault()}{lastName.FirstOrDefault()}".ToUpper();
+    }
+
+    private void GoToProfile()
+    {
+        showUserMenu = false;
+        Navigation?.NavigateTo("/account");
+    }
+
+    private void GoToSettings()
+    {
+        showUserMenu = false;
+        Navigation?.NavigateTo("/setting");
+    }
+
+    private void ShowNotifications()
+    {
+        showUserMenu = false;
+        Navigation?.NavigateTo("/audit-logs");
+    }
+
+    private void HandleLogout()
+    {
+        AuthStateService.Logout();
+        Navigation?.NavigateTo("/login", true);
+    }
+
+    public void Dispose()
+    {
+        AuthStateService.OnAuthStateChanged -= StateHasChanged;
+    }
+}

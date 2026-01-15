@@ -1,0 +1,878 @@
+@page "/barber"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@using System.Diagnostics
+@using System
+@layout MainLayout
+@inject NotificationService NotificationService
+
+<link rel="stylesheet" href="./Shared/ActionButtons.razor.css" />
+
+<div class="barbers-container">
+    <div class="barbers-header">
+        <h1>Barbers</h1>
+        <p>Manage barber staff and availability</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="barbers-summary">
+        <div class="summary-card">
+            <h3>Total Barbers</h3>
+            <p class="summary-value">@AllBarbers.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Active Barbers</h3>
+            <p class="summary-value">@AllBarbers.Count(b => b.IsActive)</p>
+        </div>
+        <div class="summary-card">
+            <h3>Default Availability</h3>
+            <p class="summary-value">Mon - Fri</p>
+        </div>
+    </div>
+
+    <div class="barbers-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search barber..." @bind-value="SearchTerm" @bind-value:event="oninput" />
+        </div>
+        <button class="btn-primary" @onclick="ShowAddForm">+ Add Barber</button>
+    </div>
+
+    <!-- Status Filter Tabs -->
+    <div class="status-tabs">
+        <button class="tab-btn @(SelectedStatus == "All" ? "active" : "")" @onclick='() => SetStatusFilter("All")'>
+            All (@AllBarbers.Count)
+        </button>
+        <button class="tab-btn @(SelectedStatus == "Active" ? "active" : "")" @onclick='() => SetStatusFilter("Active")'>
+            Active (@AllBarbers.Count(b => b.IsActive))
+        </button>
+        <button class="tab-btn @(SelectedStatus == "Inactive" ? "active" : "")" @onclick='() => SetStatusFilter("Inactive")'>
+            Inactive (@AllBarbers.Count(b => !b.IsActive))
+        </button>
+    </div>
+
+    <!-- Add/Edit Form -->
+    <AppModal IsOpen="@ShowForm" OnClose="HideForm">
+        <div class="form-card">
+            <div class="form-header">
+                <h2>@(IsEditMode ? "Edit Barber" : "Add New Barber")</h2>
+                <button class="close-btn" @onclick="HideForm">&times;</button>
+            </div>
+
+            <div class="form-content">
+                @if (IsEditMode)
+                {
+                    <!-- Edit Mode: Read-only fields -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" class="form-input" value="@FormModel.FirstName" readonly />
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" class="form-input" value="@FormModel.LastName" readonly />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-input" value="@FormModel.Email" readonly />
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="text" class="form-input" value="@FormModel.Phone" readonly />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Availability Days</label>
+                            <div class="day-selector">
+                                @foreach (var day in DayOptions)
+                                {
+                                    <button type="button" 
+                                            class="day-btn @(IsDaySelected(day.Value) ? "selected" : "")" 
+                                            @onclick="() => ToggleDay(day.Value)">
+                                        @day.Label
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Availability Time</label>
+                            <div style="display:flex; gap:10px; align-items:center;">
+                                <select class="form-input" @bind="FormModel.AvailabilityTimeStartString">
+                                    @for (int hour = 9; hour <= 19; hour++)
+                                    {
+                                        <option value="@hour.ToString("00"):00">@(@hour <= 12 ? hour : hour - 12):00 @(hour < 12 ? "AM" : "PM")</option>
+                                    }
+                                </select>
+                                <span style="color:#6b7280; font-size:13px;">to</span>
+                                <select class="form-input" @bind="FormModel.AvailabilityTimeEndString">
+                                    @for (int hour = 9; hour <= 19; hour++)
+                                    {
+                                        <option value="@hour.ToString("00"):00">@(@hour <= 12 ? hour : hour - 12):00 @(hour < 12 ? "AM" : "PM")</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-input" @onchange="@((ChangeEventArgs e) => FormModel.IsActive = bool.Parse(e.Value.ToString()))">
+                                <option value="true" selected="@FormModel.IsActive">Active</option>
+                                <option value="false" selected="@(!FormModel.IsActive)">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <!-- Add Mode: All fields editable -->
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>First Name</label>
+                            <input type="text" class="form-input" @bind-value="FormModel.FirstName" placeholder="Enter first name" />
+                        </div>
+                        <div class="form-group">
+                            <label>Last Name</label>
+                            <input type="text" class="form-input" @bind-value="FormModel.LastName" placeholder="Enter last name" />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-input" @bind-value="FormModel.Email" placeholder="Enter email" />
+                        </div>
+                        <div class="form-group">
+                            <label>Phone</label>
+                            <input type="text" class="form-input" @bind-value="FormModel.Phone" placeholder="Enter phone number" />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Availability Days</label>
+                            <div class="day-selector">
+                                @foreach (var day in DayOptions)
+                                {
+                                    <button type="button" 
+                                            class="day-btn @(IsDaySelected(day.Value) ? "selected" : "")" 
+                                            @onclick="() => ToggleDay(day.Value)">
+                                        @day.Label
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Availability Time</label>
+                            <div style="display:flex; gap:10px; align-items:center;">
+                                <select class="form-input" @bind="FormModel.AvailabilityTimeStartString">
+                                    @for (int hour = 9; hour <= 19; hour++)
+                                    {
+                                        <option value="@hour.ToString("00"):00">@(@hour <= 12 ? hour : hour - 12):00 @(hour < 12 ? "AM" : "PM")</option>
+                                    }
+                                </select>
+                                <span style="color:#6b7280; font-size:13px;">to</span>
+                                <select class="form-input" @bind="FormModel.AvailabilityTimeEndString">
+                                    @for (int hour = 9; hour <= 19; hour++)
+                                    {
+                                        <option value="@hour.ToString("00"):00">@(@hour <= 12 ? hour : hour - 12):00 @(hour < 12 ? "AM" : "PM")</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-input" @onchange="@((ChangeEventArgs e) => FormModel.IsActive = bool.Parse(e.Value.ToString()))">
+                                <option value="true" selected="@FormModel.IsActive">Active</option>
+                                <option value="false" selected="@(!FormModel.IsActive)">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+                }
+
+                <div class="form-actions">
+                    <button class="btn-save" @onclick="SaveBarber">@(IsEditMode ? "Update Barber" : "Add Barber")</button>
+                    <button class="btn-cancel" @onclick="HideForm">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </AppModal>
+
+    <AppModal IsOpen="@ShowViewBarberModal" OnClose="CloseViewBarberModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Barber Details</div>
+                <button class="icon-btn" @onclick="CloseViewBarberModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ViewingBarber != null)
+                {
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-item__label">Name</div>
+                            <div class="detail-item__value">@ViewingBarber.FullName</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Email</div>
+                            <div class="detail-item__value">@ViewingBarber.Email</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Phone</div>
+                            <div class="detail-item__value">@ViewingBarber.Phone</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Availability (Days)</div>
+                            <div class="detail-item__value">@FormatAvailabilityDays(ViewingBarber.AvailabilityDays)</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Availability (Time)</div>
+                            <div class="detail-item__value">@FormatTimeRange(ViewingBarber.AvailabilityTimeStart, ViewingBarber.AvailabilityTimeEnd)</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Status</div>
+                            <div class="detail-item__value">@(ViewingBarber.IsActive ? "Active" : "Inactive")</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Created</div>
+                            <div class="detail-item__value">@ViewingBarber.CreatedDate.ToString("MMM dd, yyyy")</div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                @if (ViewingBarber != null)
+                {
+                    <button class="btn-cancel" @onclick="CloseViewBarberModal" type="button">Close</button>
+                    <button class="btn-save" @onclick="() => EditFromView(ViewingBarber)" type="button">Edit</button>
+                }
+            </div>
+        </div>
+    </AppModal>
+
+    <AppModal IsOpen="@ShowConfirmBarberStatusModal" OnClose="CloseConfirmBarberStatusModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Confirm Action</div>
+                <button class="icon-btn" @onclick="CloseConfirmBarberStatusModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ConfirmBarber != null)
+                {
+                    <div style="color:#6b7280; font-size:14px;">
+                        Are you sure you want to @(ConfirmBarber.IsActive ? "deactivate" : "activate")
+                        <strong>@ConfirmBarber.FullName</strong>?
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                <button class="btn-cancel" @onclick="CloseConfirmBarberStatusModal" type="button">Cancel</button>
+                <button class="btn-save" @onclick="ConfirmToggleBarberStatus" type="button">Confirm</button>
+            </div>
+        </div>
+    </AppModal>
+
+    <div class="barbers-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Day</th>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Created Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (FilteredBarbers.Any())
+                {
+                    @foreach (var barber in FilteredBarbers)
+                    {
+                        <tr>
+                            <td>
+                                <div class="barber-info">
+                                    <div class="barber-avatar">@GetInitials(barber.FirstName, barber.LastName)</div>
+                                    <div>
+                                        <div class="barber-name">@barber.FirstName @barber.LastName</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>@barber.Email</td>
+                            <td>@barber.Phone</td>
+                            <td>@FormatAvailabilityDays(barber.AvailabilityDays)</td>
+                            <td>@FormatTimeRange(barber.AvailabilityTimeStart, barber.AvailabilityTimeEnd)</td>
+                            <td>
+                                <span class="badge @(barber.IsActive ? "active" : "inactive")">
+                                    @(barber.IsActive ? "Active" : "Inactive")
+                                </span>
+                            </td>
+                            <td>@barber.CreatedDate.ToString("MMM dd, yyyy")</td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn primary" title="View" @onclick="() => OpenViewBarber(barber)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn" title="Edit" @onclick="() => EditBarber(barber)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn danger" title="@(barber.IsActive ? "Deactivate" : "Activate")" @onclick="() => OpenConfirmBarberStatus(barber)">
+                                        <i class="bi @(barber.IsActive ? "bi-trash" : "bi-arrow-clockwise")"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="8" class="no-data">No barbers found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Inject]
+    private NavigationManager Navigation { get; set; }
+
+    [Inject]
+    private AuthStateService AuthStateService { get; set; }
+
+    [Inject]
+    private HybridDatabaseService? _dbService { get; set; }
+    private List<Models.Barber> AllBarbers = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+    private string SearchTerm = string.Empty;
+    private string SelectedStatus = "All";
+    private bool ShowForm = false;
+    private bool IsEditMode = false;
+    private int EditingBarberId = 0;
+
+    private bool ShowViewBarberModal = false;
+    private Models.Barber? ViewingBarber;
+
+    private bool ShowConfirmBarberStatusModal = false;
+    private Models.Barber? ConfirmBarber;
+
+    private BarberFormModel FormModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Check if user is Admin (case-insensitive)
+            var currentUser = AuthStateService.GetCurrentUser();
+            if (string.IsNullOrEmpty(currentUser?.Role) || 
+                !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                Navigation.NavigateTo("/dashboard", true);
+                return;
+            }
+
+            // Check if database service is available
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                return;
+            }
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load all barbers from database
+            await LoadBarbers();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+        }
+    }
+
+    private async Task LoadBarbers()
+    {
+        try
+        {
+            if (_dbService == null) return;
+
+            // Load all barbers from database
+            AllBarbers = await _dbService.GetBarbersAsync();
+            
+            // Debug logging
+            System.Diagnostics.Debug.WriteLine($"[UI] Loaded {AllBarbers.Count} barbers");
+            foreach (var barber in AllBarbers.Take(3)) // Log first 3 for brevity
+            {
+                System.Diagnostics.Debug.WriteLine($"[UI] Barber {barber.BarberId}: {barber.FirstName} {barber.LastName}, AvailabilityDays={barber.AvailabilityDays}, IsActive={barber.IsActive}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading barbers: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[UI] LoadBarbers error: {ex.Message}");
+        }
+    }
+
+    private IEnumerable<Models.Barber> FilteredBarbers =>
+        AllBarbers
+            .Where(b => SelectedStatus == "All" || 
+                       (SelectedStatus == "Active" && b.IsActive) ||
+                       (SelectedStatus == "Inactive" && !b.IsActive))
+            .Where(b => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        b.FirstName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        b.LastName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        b.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(b => b.FirstName);
+
+    private void SetStatusFilter(string status)
+    {
+        SelectedStatus = status;
+    }
+
+    private void ShowAddForm()
+    {
+        IsEditMode = false;
+        FormModel = new BarberFormModel
+        {
+            AvailabilityDays = "", // Start with empty so user can select their own days
+            AvailabilityTimeStartString = "09:00",
+            AvailabilityTimeEndString = "14:00" // Changed default to 2:00 PM (14:00) as per user requirement
+        };
+        ShowForm = true;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        NotificationService.ShowInfo("Add barber form opened.");
+    }
+
+    private void EditBarber(Models.Barber barber)
+    {
+        IsEditMode = true;
+        EditingBarberId = barber.BarberId;
+        FormModel = new BarberFormModel
+        {
+            FirstName = barber.FirstName,
+            LastName = barber.LastName,
+            Email = barber.Email,
+            Phone = barber.Phone,
+            AvailabilityDays = barber.AvailabilityDays,
+            AvailabilityTimeStartString = string.IsNullOrWhiteSpace(barber.AvailabilityTimeStart) ? "09:00" : barber.AvailabilityTimeStart,
+            AvailabilityTimeEndString = string.IsNullOrWhiteSpace(barber.AvailabilityTimeEnd) ? "16:00" : barber.AvailabilityTimeEnd,
+            IsActive = barber.IsActive
+        };
+        ShowForm = true;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        NotificationService.ShowInfo($"Editing barber: {barber.FirstName} {barber.LastName}");
+    }
+
+    private void OpenViewBarber(Models.Barber barber)
+    {
+        ViewingBarber = barber;
+        ShowViewBarberModal = true;
+    }
+
+    private void CloseViewBarberModal()
+    {
+        ShowViewBarberModal = false;
+        ViewingBarber = null;
+    }
+
+    private void EditFromView(Models.Barber barber)
+    {
+        CloseViewBarberModal();
+        EditBarber(barber);
+    }
+
+    private void OpenConfirmBarberStatus(Models.Barber barber)
+    {
+        ConfirmBarber = barber;
+        ShowConfirmBarberStatusModal = true;
+    }
+
+    private void CloseConfirmBarberStatusModal()
+    {
+        ShowConfirmBarberStatusModal = false;
+        ConfirmBarber = null;
+    }
+
+    private async Task ConfirmToggleBarberStatus()
+    {
+        if (ConfirmBarber == null || _dbService == null)
+        {
+            CloseConfirmBarberStatusModal();
+            return;
+        }
+
+        try
+        {
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? changedByUserId = currentUser?.UserId;
+            bool newStatus = !ConfirmBarber.IsActive;
+
+            bool ok = await _dbService.UpdateBarberStatusAsync(ConfirmBarber.BarberId, newStatus, changedByUserId);
+            if (!ok)
+            {
+                NotificationService.ShowError("Failed to update barber status.");
+                return;
+            }
+
+            await LoadBarbers();
+            NotificationService.ShowSuccess("Barber status updated.");
+            CloseConfirmBarberStatusModal();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error updating barber status: {ex.Message}");
+        }
+    }
+
+    private void HideForm()
+    {
+        ShowForm = false;
+        FormModel = new BarberFormModel();
+        IsEditMode = false;
+        EditingBarberId = 0;
+    }
+
+    private async Task SaveBarber()
+    {
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        // Validation
+        if (string.IsNullOrWhiteSpace(FormModel.FirstName))
+        {
+            ErrorMessage = "First name is required.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(FormModel.LastName))
+        {
+            ErrorMessage = "Last name is required.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(FormModel.Email))
+        {
+            ErrorMessage = "Email is required.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (_dbService == null)
+        {
+            ErrorMessage = "Database service not initialized.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        // Validate availability days
+        if (string.IsNullOrWhiteSpace(FormModel.AvailabilityDays))
+        {
+            ErrorMessage = "Please select at least one availability day.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        // Ensure availability days is not empty and trim whitespace
+        var trimmedAvailabilityDays = FormModel.AvailabilityDays.Trim();
+        if (string.IsNullOrEmpty(trimmedAvailabilityDays))
+        {
+            ErrorMessage = "Please select at least one availability day.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        // Validate time strings
+        if (string.IsNullOrWhiteSpace(FormModel.AvailabilityTimeStartString) ||
+            string.IsNullOrWhiteSpace(FormModel.AvailabilityTimeEndString))
+        {
+            ErrorMessage = "Availability time is required.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        // Parse and validate time range
+        var timeStart = ParseTimeOnly(FormModel.AvailabilityTimeStartString);
+        var timeEnd = ParseTimeOnly(FormModel.AvailabilityTimeEndString);
+        
+        if (!timeStart.HasValue || !timeEnd.HasValue || timeStart.Value >= timeEnd.Value)
+        {
+            ErrorMessage = "Availability time range is invalid. Start time must be before end time.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        try
+        {
+            if (IsEditMode)
+            {
+                // Update status and availability for existing barber
+                var currentUser = AuthStateService.GetCurrentUser();
+                int? changedByUserId = currentUser?.UserId;
+
+                bool success = await _dbService.UpdateBarberAvailabilityAsync(
+                    barberId: EditingBarberId,
+                    isActive: FormModel.IsActive,
+                    availabilityDays: trimmedAvailabilityDays,
+                    availabilityTimeStart: FormModel.AvailabilityTimeStartString,
+                    availabilityTimeEnd: FormModel.AvailabilityTimeEndString,
+                    changedByUserId: changedByUserId);
+
+                // Debug logging
+                System.Diagnostics.Debug.WriteLine($"[UI] Update called with: AvailabilityDays={FormModel.AvailabilityDays}, IsActive={FormModel.IsActive}");
+                System.Diagnostics.Debug.WriteLine($"[UI] Update result: {success}");
+
+                if (success)
+                {
+                    SuccessMessage = "Barber availability updated successfully!";
+                    NotificationService.ShowSuccess(SuccessMessage);
+                    await LoadBarbers();
+                    HideForm();
+                }
+                else
+                {
+                    ErrorMessage = "Failed to update barber availability. Please try again.";
+                    NotificationService.ShowError(ErrorMessage);
+                }
+            }
+            else
+            {
+                // Create new barber
+                Debug.WriteLine($"[UI] Creating barber with: AvailabilityDays={FormModel.AvailabilityDays}, TimeStart={FormModel.AvailabilityTimeStartString}, TimeEnd={FormModel.AvailabilityTimeEndString}");
+                
+                int barberId = await _dbService.CreateBarberAsync(
+                    firstName: FormModel.FirstName,
+                    lastName: FormModel.LastName,
+                    email: FormModel.Email,
+                    phone: FormModel.Phone,
+                    commissionRate: 0,
+                    availabilityDays: trimmedAvailabilityDays,
+                    availabilityTimeStart: FormModel.AvailabilityTimeStartString,
+                    availabilityTimeEnd: FormModel.AvailabilityTimeEndString
+                );
+
+                Debug.WriteLine($"[UI] Barber created with ID: {barberId}");
+
+                if (barberId > 0)
+                {
+                    SuccessMessage = "Barber added successfully!";
+                    NotificationService.ShowSuccess(SuccessMessage);
+                    await LoadBarbers();
+                    HideForm();
+                }
+                else
+                {
+                    ErrorMessage = "Failed to add barber. Please try again.";
+                    NotificationService.ShowError(ErrorMessage);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving barber: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+
+
+    private string GetInitials(string firstName, string lastName)
+    {
+        return $"{firstName.FirstOrDefault()}{lastName.FirstOrDefault()}".ToUpper();
+    }
+
+    public class BarberFormModel
+    {
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Phone { get; set; } = string.Empty;
+        public string AvailabilityDays { get; set; } = string.Empty; // Empty by default - user must select
+        public string AvailabilityTimeStartString { get; set; } = "09:00";
+        public string AvailabilityTimeEndString { get; set; } = "16:00";
+        public bool IsActive { get; set; } = true;
+    }
+
+    private sealed class DayOption
+    {
+        public int Value { get; set; }
+        public string Label { get; set; } = string.Empty;
+    }
+
+    private static readonly List<DayOption> DayOptions = new()
+    {
+        new DayOption { Value = 1, Label = "Mon" },
+        new DayOption { Value = 2, Label = "Tue" },
+        new DayOption { Value = 3, Label = "Wed" },
+        new DayOption { Value = 4, Label = "Thu" },
+        new DayOption { Value = 5, Label = "Fri" },
+        new DayOption { Value = 6, Label = "Sat" },
+        new DayOption { Value = 7, Label = "Sun" }
+    };
+
+    private static string DayLabel(int day)
+    {
+        var opt = DayOptions.FirstOrDefault(o => o.Value == day);
+        return opt?.Label ?? "—";
+    }
+
+    private bool IsDaySelected(int day)
+    {
+        if (string.IsNullOrWhiteSpace(FormModel.AvailabilityDays))
+            return false; // No days selected by default - user must select
+        
+        var selectedDays = FormModel.AvailabilityDays.Split(',')
+            .Select(d => int.TryParse(d.Trim(), out var dayNum) ? dayNum : 0)
+            .Where(d => d > 0)
+            .ToList();
+        
+        return selectedDays.Contains(day);
+    }
+
+    private void ToggleDay(int day)
+    {
+        var selectedDays = new List<int>();
+        
+        if (!string.IsNullOrWhiteSpace(FormModel.AvailabilityDays))
+        {
+            selectedDays = FormModel.AvailabilityDays.Split(',')
+                .Select(d => int.TryParse(d.Trim(), out var dayNum) ? dayNum : 0)
+                .Where(d => d > 0)
+                .ToList();
+        }
+
+        if (selectedDays.Contains(day))
+        {
+            selectedDays.Remove(day);
+        }
+        else
+        {
+            selectedDays.Add(day);
+        }
+
+        FormModel.AvailabilityDays = string.Join(",", selectedDays.OrderBy(d => d));
+    }
+
+    private static string FormatAvailabilityDays(string availabilityDays)
+    {
+        if (string.IsNullOrWhiteSpace(availabilityDays))
+            return "—";
+        
+        var days = availabilityDays.Split(',')
+            .Select(d => int.TryParse(d.Trim(), out var dayNum) ? dayNum : 0)
+            .Where(d => d >= 1 && d <= 7)
+            .OrderBy(d => d)
+            .ToList();
+
+        if (!days.Any())
+            return "—";
+
+        // If consecutive days, show as range
+        if (days.Count > 1)
+        {
+            var ranges = new List<string>();
+            var start = days[0];
+            var prev = days[0];
+
+            for (int i = 1; i < days.Count; i++)
+            {
+                if (days[i] == prev + 1)
+                {
+                    prev = days[i];
+                }
+                else
+                {
+                    ranges.Add(start == prev ? DayLabel(start) : $"{DayLabel(start)}-{DayLabel(prev)}");
+                    start = prev = days[i];
+                }
+            }
+            ranges.Add(start == prev ? DayLabel(start) : $"{DayLabel(start)}-{DayLabel(prev)}");
+
+            return string.Join(", ", ranges);
+        }
+
+        // Single day
+        return DayLabel(days[0]);
+    }
+
+    private static string FormatTimeRange(string start, string end)
+    {
+        if (string.IsNullOrWhiteSpace(start) || string.IsNullOrWhiteSpace(end))
+            return "—";
+        return $"{To12Hour(start)} - {To12Hour(end)}";
+    }
+
+    private static string To12Hour(string hhmm)
+    {
+        if (string.IsNullOrWhiteSpace(hhmm))
+            return "—";
+        
+        // Try parsing as TimeOnly first (HH:mm format)
+        if (TimeOnly.TryParse(hhmm, out var timeOnly))
+        {
+            return timeOnly.ToString("h:mmtt");
+        }
+        
+        // Fallback to TimeSpan parsing
+        if (TimeSpan.TryParse(hhmm, out var t))
+        {
+            var dt = DateTime.Today.Add(t);
+            return dt.ToString("h:mmtt");
+        }
+        
+        return hhmm;
+    }
+
+    private static TimeOnly? ParseTimeOnly(string hhmm)
+    {
+        if (string.IsNullOrWhiteSpace(hhmm))
+            return null;
+        return TimeOnly.TryParse(hhmm, out var t) ? t : null;
+    }
+}

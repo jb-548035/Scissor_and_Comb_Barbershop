@@ -1,0 +1,511 @@
+@page "/booking"
+@using hair.Services
+@using hair.Models
+@using hair.Components.Layout
+@layout MainLayout
+@inject NavigationManager Nav
+@inject AuthStateService AuthStateService
+@inject NotificationService NotificationService
+@inject HybridDatabaseService _dbService
+
+<link rel="stylesheet" href="./Shared/ActionButtons.razor.css" />
+
+<div class="bookings-container">
+    <div class="bookings-header">
+        <h1>Bookings</h1>
+        <p>Manage customer bookings and appointments</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="bookings-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search name or service..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+        <button class="btn-primary" @onclick="ShowAddForm">
+            <i class="bi bi-plus-circle"></i> Book Customer
+        </button>
+    </div>
+
+    <div class="bookings-tabs-container">
+        <div class="bookings-tabs">
+            <button class="tab-btn @(ActiveTab == "All" ? "active" : "")" @onclick='() => SetTab("All")'>
+                All
+            </button>
+            <button class="tab-btn @(ActiveTab == "Pending" ? "active" : "")" @onclick='() => SetTab("Pending")'>
+                Pending
+            </button>
+            <button class="tab-btn @(ActiveTab == "Paid" ? "active" : "")" @onclick='() => SetTab("Paid")'>
+                Paid
+            </button>
+            <button class="tab-btn @(ActiveTab == "Cancelled" ? "active" : "")" @onclick='() => SetTab("Cancelled")'>
+                Cancelled
+            </button>
+        </div>
+        
+        <div class="pagination-filter">
+            <label>Show:</label>
+            <select @bind="ItemsPerPage" @bind:event="onchange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+    </div>
+
+@if (ShowFormAdd)
+{
+    <div class="modal-overlay">
+        <div class="modal-content">
+            <div class="form-header">
+                <h2>Add Booking</h2>
+                <button class="close-btn" @onclick="CancelAdd">&times;</button>
+            </div>
+            <div class="form-content">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Customer Name</label>
+                    <input type="text" class="form-input" @bind="FormModel.CustomerName" placeholder="Enter customer name" />
+                </div>
+                <div class="form-group">
+                    <label>Service</label>
+                    <select class="form-input" @bind="FormModel.ServiceType" @bind:after="OnServiceOrAddonChanged">
+                        <option value="">-- select --</option>
+                        @foreach (var s in SharedData.ServicePrices.Keys)
+                        {
+                            <option>@s</option>
+                        }
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Barber</label>
+                    <select class="form-input" @bind="SelectedBarberId" @bind:event="onchange">
+                        <option value="0">-- select --</option>
+                        @foreach (var barber in Barbers.Where(b => b.IsActive))
+                        {
+                            <option value="@barber.BarberId">@barber.FullName</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Schedule</label>
+                    <input type="datetime-local" class="form-input" @bind="FormModel.Schedule" />
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Total (₱)</label>
+                    <input type="text" class="form-input" readonly value="@FormModel.TotalPrice.ToString("0.##")" />
+                </div>
+                <div class="form-group">
+                    <label>Deposit (₱)</label>
+                    <input type="number" class="form-input" step="0.01" @bind="FormModel.Deposit" />
+                </div>
+                <div class="form-group">
+                    <label>Payment Status</label>
+                    <select class="form-input" @bind="FormModel.PaymentStatus">
+                        <option>Pending</option>
+                        <option>Paid</option>
+                        <option>Cancelled</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button class="btn-save" @onclick="AddRecord">Save Booking</button>
+                <button class="btn-cancel" @onclick="CancelAdd">Cancel</button>
+            </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="bookings-table">
+    <table>
+        <thead>
+            <tr>
+                <th>Customer</th>
+                <th>Service</th>
+                <th>Barber</th>
+                <th>Total (₱)</th>
+                <th>Deposit (₱)</th>
+                <th>Schedule</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in PagedList)
+            {
+                <tr>
+                    <td>
+                        <div class="customer-info">
+                            <div class="customer-avatar">@item.CustomerName.FirstOrDefault()</div>
+                            <span>@item.CustomerName</span>
+                        </div>
+                    </td>
+                    <td>@item.ServiceType</td>
+                    <td>Barber 1</td>
+                    <td class="price">₱@item.TotalPrice.ToString("0.##")</td>
+                    <td class="price">₱@(item.Deposit?.ToString("0.##") ?? "0.00")</td>
+                    <td>@item.DateTime</td>
+                    <td>
+                        @if (item.PaymentStatus == "Paid")
+                        {
+                            <span class="status-badge @GetStatusClass(item.PaymentStatus)">@item.PaymentStatus</span>
+                        }
+                        else
+                        {
+                            <select class="status-select @GetStatusClass(item.PaymentStatus)" @bind="item.PaymentStatus" @bind:after="() => OnStatusChanged(item)">
+                                <option value="Pending">Pending</option>
+                                <option value="Paid">Paid</option>
+                                <option value="Cancelled">Cancelled</option>
+                            </select>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="pagination">
+    <div>Showing @((PageIndex - 1) * PageSize + 1) - @(Math.Min(PageIndex * PageSize, FilteredList.Count())) of @FilteredList.Count()</div>
+    <div>
+        <button class="btn-pagination" @onclick="PrevPage" disabled="@(PageIndex==1)">← Prev</button>
+        <button class="btn-pagination" @onclick="NextPage" disabled="@(PageIndex*PageSize >= FilteredList.Count())">Next →</button>
+    </div>
+</div>
+</div>
+
+@code {
+    // Database service is injected at the top of the file
+    private List<Service> Services = new();
+    private List<Models.Barber> Barbers = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+
+    // UI state
+    bool IsFormVisible => ShowFormAdd;
+    bool ShowFormAdd = false;
+    bool ShowFormEdit = false;
+
+    // forms
+    BookingFormModel FormModel = new();
+    BookingFormModel EditModel = new();
+    private int SelectedBarberId = 0;
+
+    // pagination & search
+    string SearchTerm { get; set; } = string.Empty;
+    string ActiveTab { get; set; } = "All";
+    int ItemsPerPage { get; set; } = 10;
+    int PageIndex { get; set; } = 1;
+    
+    int PageSize => ItemsPerPage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Check if database service is available
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                return;
+            }
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load services
+            Services = await _dbService.GetServicesAsync();
+            
+            // Load barbers 
+            var bookings = await _dbService.GetBookingsAsync();
+            SharedData.Records.Clear();
+            
+            foreach (var booking in bookings)
+            {
+                var serviceName = Services.FirstOrDefault(s => s.ServiceId == booking.ServiceId)?.ServiceName ?? "Unknown";
+                var barberName = GetBarberName(booking.BarberId);
+                
+                SharedData.AddRecord(new TransactionRecord
+                {
+                    BookingId = booking.BookingId,
+                    CustomerName = booking.CustomerName,
+                    ServiceType = serviceName,
+                    BarberName = barberName,
+                    AddOns = "None",
+                    TotalPrice = (double)booking.TotalAmount,
+                    Deposit = (double)booking.DepositAmount,
+                    DateTime = booking.Schedule.ToString("MM/dd/yyyy hh:mm tt"),
+                    PaymentStatus = booking.Status
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading bookings: {ex.Message}");
+        }
+    }
+
+    private async Task OnStatusChanged(TransactionRecord item)
+    {
+        if (_dbService == null || item.BookingId <= 0) return;
+        
+        try
+        {
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? changedByUserId = currentUser?.UserId;
+
+            bool success = await _dbService.UpdateBookingStatusAsync(item.BookingId, item.PaymentStatus, changedByUserId);
+            if (!success)
+            {
+                System.Diagnostics.Debug.WriteLine("Failed to update booking status in database");
+                NotificationService.ShowError("Failed to update booking status.");
+            }
+            else
+            {
+                NotificationService.ShowSuccess("Booking status updated.", autoClearMs: 3000);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error updating status: {ex.Message}");
+            NotificationService.ShowError($"Error updating status: {ex.Message}");
+        }
+    }
+
+    private string GetBarberName(int barberId)
+    {
+        var barber = Barbers.FirstOrDefault(b => b.BarberId == barberId);
+        return barber?.FullName ?? "Unknown";
+    }
+
+    // convenience wrapper: filtered list based on tab/search
+    IEnumerable<TransactionRecord> FilteredList =>
+        SharedData.Records
+            .Where(r =>
+                (ActiveTab == "All" || r.PaymentStatus == ActiveTab) &&
+                (string.IsNullOrWhiteSpace(SearchTerm)
+                    || r.CustomerName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)
+                    || r.ServiceType.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)))
+            .OrderByDescending(r => DateTime.ParseExact(r.DateTime, "MM/dd/yyyy hh:mm tt", null));
+
+    IEnumerable<TransactionRecord> PagedList => FilteredList
+        .Skip((PageIndex - 1) * PageSize)
+        .Take(PageSize);
+
+    // Get status class for styling
+    string GetStatusClass(string status)
+    {
+        return status switch
+        {
+            "Paid" => "paid",
+            "Pending" => "pending",
+            "Cancelled" => "cancelled",
+            _ => "pending"
+        };
+    }
+
+    // helpers
+    void SetTab(string tab)
+    {
+        ActiveTab = tab;
+        PageIndex = 1;
+    }
+
+
+    void ShowAddForm()
+    {
+        FormModel = new BookingFormModel();
+        FormModel.AddOns = "None";
+        FormModel.PaymentStatus = "Pending";
+        FormModel.Schedule = DateTime.Now;
+        FormModel.TotalPrice = SharedData.ComputeTotal(FormModel.ServiceType, FormModel.AddOns);
+        SelectedBarberId = 0;
+        ShowFormAdd = true;
+        ShowFormEdit = false;
+
+        NotificationService.ShowInfo("Add booking form opened.");
+    }
+
+    void CancelAdd()
+    {
+        ShowFormAdd = false;
+        NotificationService.ShowInfo("Add booking cancelled.", autoClearMs: 3000);
+    }
+
+    void OnServiceOrAddonChanged()
+    {
+        FormModel.TotalPrice = SharedData.ComputeTotal(FormModel.ServiceType, FormModel.AddOns);
+    }
+
+    void PrevPage() { if (PageIndex > 1) PageIndex--; }
+    void NextPage() { if (PageIndex * PageSize < FilteredList.Count()) PageIndex++; }
+
+    async Task AddRecord()
+    {
+        if (string.IsNullOrWhiteSpace(FormModel.CustomerName) || string.IsNullOrWhiteSpace(FormModel.ServiceType))
+        {
+            NotificationService.ShowError("Please enter customer name and select a service.");
+            return;
+        }
+
+        if (SelectedBarberId <= 0)
+        {
+            ErrorMessage = "Please select a barber.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (_dbService == null)
+        {
+            ErrorMessage = "Database service not initialized.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        try
+        {
+            // Get service ID from service name
+            var service = Services.FirstOrDefault(s => s.ServiceName == FormModel.ServiceType);
+            if (service == null)
+            {
+                ErrorMessage = "Service not found.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            // Get current user ID
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? createdByUserId = currentUser?.UserId;
+
+            // Save to database
+            var bookingId = await _dbService.CreateBookingAsync(
+                customerName: FormModel.CustomerName,
+                serviceId: service.ServiceId,
+                barberId: SelectedBarberId,
+                totalAmount: (decimal)FormModel.TotalPrice,
+                depositAmount: (decimal)FormModel.Deposit,
+                schedule: FormModel.Schedule,
+                createdByUserId: createdByUserId
+            );
+
+            if (bookingId > 0)
+            {
+                // Also add to in-memory SharedData for immediate display
+                var rec = new TransactionRecord
+                {
+                    CustomerName = FormModel.CustomerName,
+                    ServiceType = FormModel.ServiceType,
+                    AddOns = FormModel.AddOns ?? "None",
+                    TotalPrice = FormModel.TotalPrice,
+                    Deposit = FormModel.Deposit,
+                    PaymentStatus = FormModel.PaymentStatus ?? "Pending",
+                    DateTime = FormModel.Schedule.ToString("MM/dd/yyyy hh:mm tt")
+                };
+                SharedData.AddRecord(rec);
+                SuccessMessage = "Booking saved successfully!";
+                NotificationService.ShowSuccess(SuccessMessage);
+                CancelAdd();
+                await LoadBookingsFromDatabase();
+            }
+            else if (bookingId == -1)
+            {
+                ErrorMessage = "The selected barber is not available at the requested time. Please choose a different time or barber.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+            else if (bookingId == -2)
+            {
+                ErrorMessage = "Cannot book appointments for past times. Please select a future date and time.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+            else
+            {
+                ErrorMessage = "Failed to save booking. Please try again.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving booking: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+
+    private async Task LoadBookingsFromDatabase()
+    {
+        try
+        {
+            if (_dbService == null) return;
+
+            var bookings = await _dbService.GetBookingsAsync();
+            SharedData.Records.Clear();
+            
+            foreach (var booking in bookings)
+            {
+                var serviceName = Services.FirstOrDefault(s => s.ServiceId == booking.ServiceId)?.ServiceName ?? "Unknown";
+                var barberName = GetBarberName(booking.BarberId);
+                
+                SharedData.AddRecord(new TransactionRecord
+                {
+                    BookingId = booking.BookingId,
+                    CustomerName = booking.CustomerName,
+                    ServiceType = serviceName,
+                    BarberName = barberName,
+                    AddOns = "None",
+                    TotalPrice = (double)booking.TotalAmount,
+                    Deposit = (double)booking.DepositAmount,
+                    DateTime = booking.Schedule.ToString("MM/dd/yyyy hh:mm tt"),
+                    PaymentStatus = booking.Status
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading bookings from database: {ex.Message}");
+            NotificationService.ShowError("Error refreshing bookings data.");
+        }
+    }
+
+
+    // BookingFormModel (internal)
+    public class BookingFormModel
+    {
+        public string CustomerName { get; set; } = string.Empty;
+        public string ServiceType { get; set; } = string.Empty;
+        public string AddOns { get; set; } = "None";
+        public double TotalPrice { get; set; }
+        public double Deposit { get; set; }
+        public string PaymentStatus { get; set; } = "Pending";
+        public DateTime Schedule { get; set; } = DateTime.Now;
+    }
+}

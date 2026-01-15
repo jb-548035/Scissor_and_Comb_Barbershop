@@ -1,0 +1,472 @@
+@page "/services"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@using System.Diagnostics
+@layout MainLayout
+@inject NotificationService NotificationService
+
+<link rel="stylesheet" href="./Shared/ActionButtons.razor.css" />
+
+<div class="services-container">
+    <div class="services-header">
+        <h1>Services</h1>
+        <p>Manage barbershop services and pricing</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="services-summary">
+        <div class="summary-card">
+            <h3>Total Services</h3>
+            <p class="summary-value">@AllServices.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Average Price</h3>
+            <p class="summary-value">₱@(AllServices.Any() ? AllServices.Average(s => s.Price).ToString("0.##") : "0.00")</p>
+        </div>
+    </div>
+
+    <div class="services-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search service..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+        <button class="btn-primary" @onclick="ShowAddForm">+ Add Service</button>
+    </div>
+
+    <!-- Add/Edit Form -->
+    <AppModal IsOpen="@ShowForm" OnClose="HideForm">
+        <div class="form-card">
+            <div class="form-header">
+                <h2>@(IsEditMode ? "Edit Service" : "Add New Service")</h2>
+                <button class="close-btn" @onclick="HideForm">&times;</button>
+            </div>
+
+            <div class="form-content">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Service Name</label>
+                        <input type="text" class="form-input" @bind="FormModel.ServiceName" placeholder="Enter service name" />
+                    </div>
+                    <div class="form-group">
+                        <label>Price (₱)</label>
+                        <input type="number" class="form-input" step="0.01" min="0" @bind="FormModel.Price" placeholder="0.00" />
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn-save" @onclick="SaveService">@(IsEditMode ? "Update Service" : "Add Service")</button>
+                    <button class="btn-cancel" @onclick="HideForm">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </AppModal>
+
+    <AppModal IsOpen="@ShowViewServiceModal" OnClose="CloseViewServiceModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Service Details</div>
+                <button class="icon-btn" @onclick="CloseViewServiceModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ViewingService != null)
+                {
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-item__label">Service Name</div>
+                            <div class="detail-item__value">@ViewingService.ServiceName</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Price</div>
+                            <div class="detail-item__value">₱@ViewingService.Price.ToString("0.##")</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Created Date</div>
+                            <div class="detail-item__value">@ViewingService.CreatedDate.ToString("MMM dd, yyyy")</div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                @if (ViewingService != null)
+                {
+                    <button class="btn-cancel" @onclick="CloseViewServiceModal" type="button">Close</button>
+                    <button class="btn-save" @onclick="() => EditFromView(ViewingService)" type="button">Edit</button>
+                }
+            </div>
+        </div>
+    </AppModal>
+
+    <AppModal IsOpen="@ShowConfirmDeleteModal" OnClose="CloseConfirmDeleteModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Confirm Delete</div>
+                <button class="icon-btn" @onclick="CloseConfirmDeleteModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ServiceToDelete != null)
+                {
+                    <div style="color:#6b7280; font-size:14px;">
+                        Are you sure you want to delete the service
+                        <strong>@ServiceToDelete.ServiceName</strong>?
+                        <br />
+                        <span style="color:#ef4444; font-size:12px; margin-top:8px; display:block;">This action cannot be undone.</span>
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                <button class="btn-cancel" @onclick="CloseConfirmDeleteModal" type="button">Cancel</button>
+                <button class="btn-save" @onclick="ConfirmDeleteService" type="button" style="background:#ef4444;">Delete</button>
+            </div>
+        </div>
+    </AppModal>
+
+    <div class="services-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Service Name</th>
+                    <th>Price</th>
+                    <th>Created Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (FilteredServices.Any())
+                {
+                    @foreach (var service in FilteredServices)
+                    {
+                        <tr>
+                            <td>
+                                <div class="service-info">
+                                    <div class="service-icon">@service.ServiceName.FirstOrDefault()</div>
+                                    <div class="service-name">@service.ServiceName</div>
+                                </div>
+                            </td>
+                            <td class="price">₱@service.Price.ToString("0.##")</td>
+                            <td>@service.CreatedDate.ToString("MMM dd, yyyy")</td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn primary" title="View" @onclick="() => OpenViewService(service)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn" title="Edit" @onclick="() => EditService(service)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn danger" title="Delete" @onclick="() => OpenConfirmDelete(service)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="4" class="no-data">No services found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Inject]
+    private NavigationManager Navigation { get; set; }
+
+    [Inject]
+    private AuthStateService AuthStateService { get; set; }
+
+    [Inject]
+    private HybridDatabaseService? _dbService { get; set; }
+    private List<Service> AllServices = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+    private string SearchTerm = string.Empty;
+    private bool ShowForm = false;
+    private bool IsEditMode = false;
+    private int EditingServiceId = 0;
+
+    private bool ShowViewServiceModal = false;
+    private Service? ViewingService;
+
+    private bool ShowConfirmDeleteModal = false;
+    private Service? ServiceToDelete;
+
+    private ServiceFormModel FormModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Check if user is Admin (case-insensitive)
+            var currentUser = AuthStateService.GetCurrentUser();
+            if (string.IsNullOrEmpty(currentUser?.Role) || 
+                !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                Navigation.NavigateTo("/dashboard", true);
+                return;
+            }
+
+            // Check if database service is available
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                return;
+            }
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load all services from database
+            await LoadServices();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+        }
+    }
+
+    private async Task LoadServices()
+    {
+        try
+        {
+            if (_dbService == null) return;
+
+            // Load all services from database
+            AllServices = await _dbService.GetServicesAsync();
+            
+            // Debug logging
+            System.Diagnostics.Debug.WriteLine($"[UI] Loaded {AllServices.Count} services");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading services: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[UI] LoadServices error: {ex.Message}");
+        }
+    }
+
+    private IEnumerable<Service> FilteredServices =>
+        AllServices
+            .Where(s => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        s.ServiceName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => s.ServiceName);
+
+    private void ShowAddForm()
+    {
+        IsEditMode = false;
+        FormModel = new ServiceFormModel();
+        ShowForm = true;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        NotificationService.ShowInfo("Add service form opened.");
+    }
+
+    private void EditService(Service service)
+    {
+        IsEditMode = true;
+        EditingServiceId = service.ServiceId;
+        FormModel = new ServiceFormModel
+        {
+            ServiceName = service.ServiceName,
+            Price = service.Price
+        };
+        ShowForm = true;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        NotificationService.ShowInfo($"Editing service: {service.ServiceName}");
+    }
+
+    private void OpenViewService(Service service)
+    {
+        ViewingService = service;
+        ShowViewServiceModal = true;
+    }
+
+    private void CloseViewServiceModal()
+    {
+        ShowViewServiceModal = false;
+        ViewingService = null;
+    }
+
+    private void EditFromView(Service service)
+    {
+        CloseViewServiceModal();
+        EditService(service);
+    }
+
+    private void OpenConfirmDelete(Service service)
+    {
+        ServiceToDelete = service;
+        ShowConfirmDeleteModal = true;
+    }
+
+    private void CloseConfirmDeleteModal()
+    {
+        ShowConfirmDeleteModal = false;
+        ServiceToDelete = null;
+    }
+
+    private async Task ConfirmDeleteService()
+    {
+        if (ServiceToDelete == null || _dbService == null)
+        {
+            CloseConfirmDeleteModal();
+            return;
+        }
+
+        try
+        {
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? changedByUserId = currentUser?.UserId;
+
+            bool ok = await _dbService.DeleteServiceAsync(ServiceToDelete.ServiceId, changedByUserId);
+            if (!ok)
+            {
+                NotificationService.ShowError("Failed to delete service.");
+                return;
+            }
+
+            await LoadServices();
+            NotificationService.ShowSuccess("Service deleted successfully.");
+            CloseConfirmDeleteModal();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error deleting service: {ex.Message}");
+        }
+    }
+
+    private void HideForm()
+    {
+        ShowForm = false;
+        FormModel = new ServiceFormModel();
+        IsEditMode = false;
+        EditingServiceId = 0;
+    }
+
+    private async Task SaveService()
+    {
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        // Validation
+        if (string.IsNullOrWhiteSpace(FormModel.ServiceName))
+        {
+            ErrorMessage = "Service name is required.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (FormModel.Price < 0)
+        {
+            ErrorMessage = "Price must be greater than or equal to 0.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        if (_dbService == null)
+        {
+            ErrorMessage = "Database service not initialized.";
+            NotificationService.ShowError(ErrorMessage);
+            return;
+        }
+
+        try
+        {
+            if (IsEditMode)
+            {
+                // Update existing service
+                var currentUser = AuthStateService.GetCurrentUser();
+                int? changedByUserId = currentUser?.UserId;
+
+                bool success = await _dbService.UpdateServiceAsync(
+                    serviceId: EditingServiceId,
+                    serviceName: FormModel.ServiceName,
+                    price: FormModel.Price,
+                    changedByUserId: changedByUserId);
+
+                if (success)
+                {
+                    SuccessMessage = "Service updated successfully!";
+                    NotificationService.ShowSuccess(SuccessMessage);
+                    await LoadServices();
+                    HideForm();
+                }
+                else
+                {
+                    ErrorMessage = "Failed to update service. Please try again.";
+                    NotificationService.ShowError(ErrorMessage);
+                }
+            }
+            else
+            {
+                // Create new service
+                var currentUser = AuthStateService.GetCurrentUser();
+                int? createdByUserId = currentUser?.UserId;
+
+                int serviceId = await _dbService.CreateServiceAsync(
+                    serviceName: FormModel.ServiceName,
+                    price: FormModel.Price,
+                    createdByUserId: createdByUserId);
+
+                if (serviceId > 0)
+                {
+                    SuccessMessage = "Service added successfully!";
+                    NotificationService.ShowSuccess(SuccessMessage);
+                    await LoadServices();
+                    HideForm();
+                }
+                else
+                {
+                    ErrorMessage = "Failed to add service. Please try again.";
+                    NotificationService.ShowError(ErrorMessage);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving service: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+
+    public class ServiceFormModel
+    {
+        public string ServiceName { get; set; } = string.Empty;
+        public decimal Price { get; set; }
+    }
+}
+

@@ -1,0 +1,81 @@
+@using hair.Services
+@inject AuthStateService AuthStateService
+@inject NavigationManager Navigation
+
+@if (IsAuthorized)
+{
+    @ChildContent
+}
+else
+{
+    <div style="padding: 40px 20px; text-align: center;">
+        <h2>Access Denied</h2>
+        <p>You don't have permission to access this page.</p>
+        <p>Only @string.Join(", ", AllowedRoles) can access this page.</p>
+        <button @onclick="RedirectBasedOnRole"
+                style="padding: 10px 20px; background: #000; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600;">
+            Go Back
+        </button>
+    </div>
+}
+
+@code {
+    [Parameter] public RenderFragment ChildContent { get; set; }
+    [Parameter] public string[] AllowedRoles { get; set; } = new[] { "Admin" };
+
+    private bool IsAuthorized;
+
+    protected override void OnInitialized()
+    {
+        AuthStateService.OnAuthStateChanged += OnAuthStateChanged;
+        CheckAuthorization();
+    }
+
+    private void CheckAuthorization()
+    {
+        var user = AuthStateService.GetCurrentUser();
+
+        if (user == null || !AuthStateService.IsLoggedIn())
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        IsAuthorized = AllowedRoles.Contains(user.Role);
+
+        if (!IsAuthorized)
+        {
+            RedirectBasedOnRole();
+        }
+    }
+
+    private void RedirectBasedOnRole()
+    {
+        var user = AuthStateService.GetCurrentUser();
+
+        if (user == null)
+        {
+            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        // Role-based landing pages
+        if (user.Role == "Admin")
+            Navigation.NavigateTo("/dashboard", true);
+        else if (user.Role == "Cashier")
+            Navigation.NavigateTo("/walkin", true);
+        else
+            Navigation.NavigateTo("/login", true);
+    }
+
+    private void OnAuthStateChanged()
+    {
+        CheckAuthorization();
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        AuthStateService.OnAuthStateChanged -= OnAuthStateChanged;
+    }
+}

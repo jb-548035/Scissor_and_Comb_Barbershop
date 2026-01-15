@@ -1,0 +1,1024 @@
+@page "/audit-logs"
+@using hair.Components.Layout
+@using hair.Models
+@using hair.Services
+@layout MainLayout
+@inject NavigationManager Navigation
+@inject AuthStateService AuthStateService
+@inject HybridDatabaseService Db
+@inject NotificationService NotificationService
+
+<div class="auditlogs-container">
+    <div class="auditlogs-header">
+        <h1>Audit Logs</h1>
+        <p>Track all data changes across the system</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    <div class="auditlogs-summary">
+        <div class="summary-card">
+            <div class="summary-label">Total Logs</div>
+            <div class="summary-value">@FilteredLogs.Count()</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Inserts</div>
+            <div class="summary-value">@FilteredLogs.Count(l => l.Action.Equals("INSERT", StringComparison.OrdinalIgnoreCase))</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Updates</div>
+            <div class="summary-value">@FilteredLogs.Count(l => l.Action.Equals("UPDATE", StringComparison.OrdinalIgnoreCase))</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Deletes</div>
+            <div class="summary-value">@FilteredLogs.Count(l => l.Action.Equals("DELETE", StringComparison.OrdinalIgnoreCase))</div>
+        </div>
+    </div>
+
+    <div class="auditlogs-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search table, action, record id..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+
+        <div class="auditlogs-filters">
+            <select class="filter-select" @bind="SelectedTable" @bind:event="onchange">
+                <option value="">All tables</option>
+                @foreach (var name in TableNames)
+                {
+                    <option value="@name">@name</option>
+                }
+            </select>
+
+            <select class="filter-select" @bind="SelectedAction" @bind:event="onchange">
+                <option value="">All actions</option>
+                <option value="INSERT">INSERT</option>
+                <option value="UPDATE">UPDATE</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+
+            <div class="date-filter">
+                <label>From</label>
+                <input type="date" class="filter-date" @bind="FromDate" @bind:event="onchange" />
+            </div>
+            <div class="date-filter">
+                <label>To</label>
+                <input type="date" class="filter-date" @bind="ToDate" @bind:event="onchange" />
+            </div>
+
+            <button class="btn-reset-inline" @onclick="ResetFilters">Reset</button>
+        </div>
+
+        <button class="btn-export" @onclick="Refresh">
+            <i class="bi bi-arrow-clockwise"></i>
+            Refresh
+        </button>
+    </div>
+
+    <div class="auditlogs-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Action</th>
+                    <th>Table</th>
+                    <th>Record</th>
+                    <th>User</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (PagedLogs.Any())
+                {
+                    @foreach (var log in PagedLogs)
+                    {
+                        <tr>
+                            <td>@log.ChangedDate.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <span class="audit-action @GetActionClass(log.Action)">@log.Action</span>
+                            </td>
+                            <td>@log.TableName</td>
+                            <td>#@log.RecordId</td>
+                            <td>@(log.ChangedByUserId?.ToString() ?? "—")</td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn primary" title="View" @onclick="() => OpenDetails(log)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <button type="button" class="icon-btn danger" title="Delete" @onclick="() => OpenConfirmDelete(log)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="6" class="no-data">No audit logs found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="auditlogs-pagination">
+        <div class="pagination-filter">
+            <label>Show:</label>
+            <select @bind="ItemsPerPage" @bind:event="onchange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+
+        <div class="pager">
+            <button class="pager-btn" disabled="@(CurrentPage <= 1)" @onclick="PrevPage">Prev</button>
+            <span class="pager-info">Page @CurrentPage of @TotalPages</span>
+            <button class="pager-btn" disabled="@(CurrentPage >= TotalPages)" @onclick="NextPage">Next</button>
+        </div>
+    </div>
+</div>
+
+<AppModal IsOpen="@IsDetailsOpen" OnClose="CloseDetails">
+    <div class="action-modal">
+        <div class="action-modal__header">
+            <div class="action-modal__title">Activity Details</div>
+            <button class="icon-btn" @onclick="CloseDetails" type="button" title="Close">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+
+        @if (SelectedLog != null)
+        {
+            <div class="action-modal__body">
+                <div class="activity-summary">
+                    <div class="activity-icon">
+                        <i class="bi @GetActionIcon(SelectedLog.Action)"></i>
+                    </div>
+                    <div class="activity-info">
+                        <h3>@GetActionDescription(SelectedLog.Action)</h3>
+                        <p>@GetTableDescription(SelectedLog.TableName)</p>
+                    </div>
+                </div>
+
+                <div class="activity-details">
+                    <div class="detail-row">
+                        <div class="detail-label">What happened:</div>
+                        <div class="detail-value">@GetActionDescription(SelectedLog.Action)</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">What was changed:</div>
+                        <div class="detail-value">@GetTableDescription(SelectedLog.TableName)</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">When it happened:</div>
+                        <div class="detail-value">@SelectedLog.ChangedDate.ToString("MMMM dd, yyyy 'at' h:mm tt")</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Who made the change:</div>
+                        <div class="detail-value">@GetUserName(SelectedLog.ChangedByUserId)</div>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(SelectedLog.OldValues) || !string.IsNullOrEmpty(SelectedLog.NewValues))
+                {
+                    <div class="changes-section">
+                        <h4>Changes Made</h4>
+                        @if (SelectedLog.Action.Equals("DELETE", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="deleted-item">
+                                <p><strong>Deleted Information:</strong></p>
+                                <div class="info-grid">
+                                    @GetDeletedItemInfoList(SelectedLog)
+                                </div>
+                            </div>
+                        }
+                        else if (SelectedLog.Action.Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="created-item">
+                                <p><strong>New Information Added:</strong></p>
+                                <div class="info-grid">
+                                    @GetCreatedItemInfoList(SelectedLog)
+                                </div>
+                            </div>
+                        }
+                        else if (SelectedLog.Action.Equals("UPDATE", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="updated-item">
+                                <div class="comparison-grid">
+                                    <div class="old-values">
+                                        <p><strong>Previous Information:</strong></p>
+                                        <div class="info-grid">
+                                            @GetDeletedItemInfoList(SelectedLog)
+                                        </div>
+                                    </div>
+                                    <div class="new-values">
+                                        <p><strong>New Information:</strong></p>
+                                        <div class="info-grid">
+                                            @GetCreatedItemInfoList(SelectedLog)
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                <button class="btn-cancel" @onclick="CloseDetails" type="button">Close</button>
+            </div>
+        }
+    </div>
+</AppModal>
+
+<AppModal IsOpen="@IsConfirmDeleteOpen" OnClose="CloseConfirmDelete">
+    <div class="action-modal">
+        <div class="action-modal__header">
+            <div class="action-modal__title">Delete Audit Log</div>
+            <button class="icon-btn" @onclick="CloseConfirmDelete" type="button" title="Close">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+
+        <div class="action-modal__body">
+            @if (DeleteTarget != null)
+            {
+                <div style="color:#6b7280; font-size:14px;">
+                    This will permanently remove this audit log entry.
+                    <br />
+                    <strong>@DeleteTarget.TableName</strong> #@DeleteTarget.RecordId (@DeleteTarget.Action)
+                </div>
+            }
+        </div>
+
+        <div class="action-modal__footer">
+            <button class="btn-cancel" @onclick="CloseConfirmDelete" type="button">Cancel</button>
+            <button class="btn-save" @onclick="ConfirmDelete" type="button">Delete</button>
+        </div>
+    </div>
+</AppModal>
+
+@code {
+    private List<AuditLog> AllLogs = new();
+    private string ErrorMessage = string.Empty;
+
+    private string SearchTerm = string.Empty;
+    private string SelectedTable = string.Empty;
+    private string SelectedAction = string.Empty;
+    private DateTime? FromDate;
+    private DateTime? ToDate;
+
+    private int ItemsPerPage = 20;
+    private int CurrentPage = 1;
+
+    private bool IsDetailsOpen;
+    private AuditLog? SelectedLog;
+
+    private bool IsConfirmDeleteOpen;
+    private AuditLog? DeleteTarget;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var currentUser = AuthStateService.GetCurrentUser();
+        if (string.IsNullOrEmpty(currentUser?.Role) ||
+            !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/dashboard", true);
+            return;
+        }
+
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        try
+        {
+            ErrorMessage = string.Empty;
+            AllLogs = await Db.GetAuditLogsAsync();
+            CurrentPage = 1;
+            NotificationService.ShowInfo("Audit logs loaded.");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading audit logs: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+
+    private IEnumerable<string> TableNames =>
+        AllLogs
+            .Select(l => l.TableName)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n);
+
+    private IEnumerable<AuditLog> FilteredLogs
+    {
+        get
+        {
+            IEnumerable<AuditLog> query = AllLogs;
+
+            if (!string.IsNullOrWhiteSpace(SelectedTable))
+            {
+                query = query.Where(l => l.TableName.Equals(SelectedTable, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(SelectedAction))
+            {
+                query = query.Where(l => l.Action.Equals(SelectedAction, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (FromDate.HasValue)
+            {
+                var from = FromDate.Value.Date;
+                query = query.Where(l => l.ChangedDate >= from);
+            }
+
+            if (ToDate.HasValue)
+            {
+                var to = ToDate.Value.Date.AddDays(1).AddTicks(-1);
+                query = query.Where(l => l.ChangedDate <= to);
+            }
+
+            if (!string.IsNullOrWhiteSpace(SearchTerm))
+            {
+                query = query.Where(l =>
+                    l.TableName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    l.Action.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    l.RecordId.ToString().Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    (l.ChangedByUserId?.ToString() ?? string.Empty).Contains(SearchTerm, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return query;
+        }
+    }
+
+    private int TotalPages
+    {
+        get
+        {
+            var total = FilteredLogs.Count();
+            return Math.Max(1, (int)Math.Ceiling(total / (double)ItemsPerPage));
+        }
+    }
+
+    private IEnumerable<AuditLog> PagedLogs =>
+        FilteredLogs
+            .Skip((CurrentPage - 1) * ItemsPerPage)
+            .Take(ItemsPerPage);
+
+    private void PrevPage()
+    {
+        if (CurrentPage > 1)
+            CurrentPage--;
+    }
+
+    private void NextPage()
+    {
+        if (CurrentPage < TotalPages)
+            CurrentPage++;
+    }
+
+    private void ResetFilters()
+    {
+        SearchTerm = string.Empty;
+        SelectedTable = string.Empty;
+        SelectedAction = string.Empty;
+        FromDate = null;
+        ToDate = null;
+        CurrentPage = 1;
+
+        NotificationService.ShowInfo("Filters reset.");
+    }
+
+    private string GetActionClass(string action)
+    {
+        if (action == null) return "default";
+
+        return action.Trim().ToUpperInvariant() switch
+        {
+            "INSERT" => "insert",
+            "UPDATE" => "update",
+            "DELETE" => "delete",
+            _ => "default"
+        };
+    }
+
+    private void OpenDetails(AuditLog log)
+    {
+        SelectedLog = log;
+        IsDetailsOpen = true;
+    }
+
+    private void CloseDetails()
+    {
+        IsDetailsOpen = false;
+        SelectedLog = null;
+    }
+
+    private void OpenConfirmDelete(AuditLog log)
+    {
+        DeleteTarget = log;
+        IsConfirmDeleteOpen = true;
+    }
+
+    private void CloseConfirmDelete()
+    {
+        IsConfirmDeleteOpen = false;
+        DeleteTarget = null;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (DeleteTarget == null)
+        {
+            CloseConfirmDelete();
+            return;
+        }
+
+        try
+        {
+            var currentUser = AuthStateService.GetCurrentUser();
+            int? changedByUserId = currentUser?.UserId;
+
+            var ok = await Db.DeleteAuditLogAsync(DeleteTarget.AuditLogId, changedByUserId);
+            if (!ok)
+            {
+                NotificationService.ShowError("Failed to delete audit log.");
+                return;
+            }
+
+            NotificationService.ShowSuccess("Audit log deleted.");
+            CloseConfirmDelete();
+            await Refresh();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error deleting audit log: {ex.Message}");
+        }
+    }
+
+    // Helper methods for user-friendly display
+    private string GetActionIcon(string action)
+    {
+        return action switch
+        {
+            "INSERT" => "bi-plus-circle-fill text-success",
+            "UPDATE" => "bi-pencil-fill text-warning",
+            "DELETE" => "bi-trash-fill text-danger",
+            _ => "bi-info-circle-fill text-primary"
+        };
+    }
+
+    private string GetActionDescription(string action)
+    {
+        return action switch
+        {
+            "INSERT" => "New item was created",
+            "UPDATE" => "Item was updated",
+            "DELETE" => "Item was deleted",
+            _ => "Action was performed"
+        };
+    }
+
+    private string GetTableDescription(string tableName)
+    {
+        return tableName switch
+        {
+            "Barbers" => "Barber information",
+            "Services" => "Service information",
+            "Users" => "User account",
+            "Bookings" => "Booking record",
+            "Customers" => "Customer information",
+            "Accounts" => "Account information",
+            _ => $"{tableName} record"
+        };
+    }
+
+    private string GetUserName(int? userId)
+    {
+        if (!userId.HasValue)
+            return "System";
+        
+        // In a real implementation, you would fetch the user name from the database
+        // For now, we'll return a placeholder
+        return $"User {userId.Value}";
+    }
+
+    private string GetDeletedItemInfo(AuditLog log)
+    {
+        if (string.IsNullOrEmpty(log.OldValues))
+            return "No details available";
+
+        try
+        {
+            var data = System.Text.Json.JsonDocument.Parse(log.OldValues);
+            var root = data.RootElement;
+            
+            if (log.TableName == "Barbers")
+            {
+                var firstName = root.TryGetProperty("FirstName", out var fn) ? fn.GetString() : "";
+                var lastName = root.TryGetProperty("LastName", out var ln) ? ln.GetString() : "";
+                var email = root.TryGetProperty("Email", out var emailProp) ? emailProp.GetString() : "";
+                
+                return $@"
+                    <div class='info-item'>
+                        <span class='info-label'>Name:</span> 
+                        <span class='info-value'>{firstName} {lastName}</span>
+                    </div>
+                    <div class='info-item'>
+                        <span class='info-label'>Email:</span> 
+                        <span class='info-value'>{email}</span>
+                    </div>";
+            }
+            else if (log.TableName == "Services")
+            {
+                var serviceName = root.TryGetProperty("ServiceName", out var name) ? name.GetString() : "";
+                var price = root.TryGetProperty("Price", out var priceProp) ? priceProp.GetDecimal() : 0;
+                
+                return $@"
+                    <div class='info-item'>
+                        <span class='info-label'>Service:</span> 
+                        <span class='info-value'>{serviceName}</span>
+                    </div>
+                    <div class='info-item'>
+                        <span class='info-label'>Price:</span> 
+                        <span class='info-value'>${price:F2}</span>
+                    </div>";
+            }
+            
+            return "Item details were removed";
+        }
+        catch
+        {
+            return "Item details were removed";
+        }
+    }
+
+    private RenderFragment GetDeletedItemInfoList(AuditLog log) => builder =>
+    {
+        if (string.IsNullOrEmpty(log.OldValues))
+        {
+            builder.AddContent(0, "No details available");
+            return;
+        }
+
+        try
+        {
+            var data = System.Text.Json.JsonDocument.Parse(log.OldValues);
+            var root = data.RootElement;
+            
+            if (log.TableName == "Barbers")
+            {
+                var firstName = root.TryGetProperty("FirstName", out var fn) ? fn.GetString() : "";
+                var lastName = root.TryGetProperty("LastName", out var ln) ? ln.GetString() : "";
+                var email = root.TryGetProperty("Email", out var emailProp) ? emailProp.GetString() : "";
+                var phone = root.TryGetProperty("Phone", out var phoneProp) ? phoneProp.GetString() : "";
+                var isActive = root.TryGetProperty("IsActive", out var activeProp) ? activeProp.GetBoolean() : true;
+                var availabilityDays = root.TryGetProperty("AvailabilityDays", out var daysProp) ? daysProp.GetString() : "";
+                var availabilityStart = root.TryGetProperty("AvailabilityTimeStart", out var startProp) ? startProp.GetString() : "";
+                var availabilityEnd = root.TryGetProperty("AvailabilityTimeEnd", out var endProp) ? endProp.GetString() : "";
+
+                if (!string.IsNullOrEmpty(firstName) || !string.IsNullOrEmpty(lastName))
+                {
+                    builder.OpenElement(0, "div");
+                    builder.AddAttribute(1, "class", "info-item");
+                    builder.OpenElement(2, "span");
+                    builder.AddAttribute(3, "class", "info-label");
+                    builder.AddContent(4, "Full Name:");
+                    builder.CloseElement();
+                    builder.OpenElement(5, "span");
+                    builder.AddAttribute(6, "class", "info-value");
+                    builder.AddContent(7, $"{firstName} {lastName}");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(email))
+                {
+                    builder.OpenElement(8, "div");
+                    builder.AddAttribute(9, "class", "info-item");
+                    builder.OpenElement(10, "span");
+                    builder.AddAttribute(11, "class", "info-label");
+                    builder.AddContent(12, "Email:");
+                    builder.CloseElement();
+                    builder.OpenElement(13, "span");
+                    builder.AddAttribute(14, "class", "info-value");
+                    builder.AddContent(15, email);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(phone))
+                {
+                    builder.OpenElement(16, "div");
+                    builder.AddAttribute(17, "class", "info-item");
+                    builder.OpenElement(18, "span");
+                    builder.AddAttribute(19, "class", "info-label");
+                    builder.AddContent(20, "Phone:");
+                    builder.CloseElement();
+                    builder.OpenElement(21, "span");
+                    builder.AddAttribute(22, "class", "info-value");
+                    builder.AddContent(23, phone);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                builder.OpenElement(24, "div");
+                builder.AddAttribute(25, "class", "info-item");
+                builder.OpenElement(26, "span");
+                builder.AddAttribute(27, "class", "info-label");
+                builder.AddContent(28, "Status:");
+                builder.CloseElement();
+                builder.OpenElement(29, "span");
+                builder.AddAttribute(30, "class", "info-value");
+                builder.AddContent(31, isActive ? "Active" : "Inactive");
+                builder.CloseElement();
+                builder.CloseElement();
+
+                if (!string.IsNullOrEmpty(availabilityDays))
+                {
+                    builder.OpenElement(32, "div");
+                    builder.AddAttribute(33, "class", "info-item");
+                    builder.OpenElement(34, "span");
+                    builder.AddAttribute(35, "class", "info-label");
+                    builder.AddContent(36, "Working Days:");
+                    builder.CloseElement();
+                    builder.OpenElement(37, "span");
+                    builder.AddAttribute(38, "class", "info-value");
+                    builder.AddContent(39, FormatAvailabilityDays(availabilityDays));
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(availabilityStart) && !string.IsNullOrEmpty(availabilityEnd))
+                {
+                    builder.OpenElement(40, "div");
+                    builder.AddAttribute(41, "class", "info-item");
+                    builder.OpenElement(42, "span");
+                    builder.AddAttribute(43, "class", "info-label");
+                    builder.AddContent(44, "Working Hours:");
+                    builder.CloseElement();
+                    builder.OpenElement(45, "span");
+                    builder.AddAttribute(46, "class", "info-value");
+                    builder.AddContent(47, $"{FormatTime(availabilityStart)} - {FormatTime(availabilityEnd)}");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+            }
+            else if (log.TableName == "Services")
+            {
+                var serviceName = root.TryGetProperty("ServiceName", out var name) ? name.GetString() : "";
+                var price = root.TryGetProperty("Price", out var priceProp) ? priceProp.GetDecimal() : 0;
+                var duration = root.TryGetProperty("Duration", out var durationProp) ? durationProp.GetInt32() : 0;
+                var description = root.TryGetProperty("Description", out var descProp) ? descProp.GetString() : "";
+
+                if (!string.IsNullOrEmpty(serviceName))
+                {
+                    builder.OpenElement(0, "div");
+                    builder.AddAttribute(1, "class", "info-item");
+                    builder.OpenElement(2, "span");
+                    builder.AddAttribute(3, "class", "info-label");
+                    builder.AddContent(4, "Service Name:");
+                    builder.CloseElement();
+                    builder.OpenElement(5, "span");
+                    builder.AddAttribute(6, "class", "info-value");
+                    builder.AddContent(7, serviceName);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                builder.OpenElement(8, "div");
+                builder.AddAttribute(9, "class", "info-item");
+                builder.OpenElement(10, "span");
+                builder.AddAttribute(11, "class", "info-label");
+                builder.AddContent(12, "Price:");
+                builder.CloseElement();
+                builder.OpenElement(13, "span");
+                builder.AddAttribute(14, "class", "info-value");
+                builder.AddContent(15, $"${price:F2}");
+                builder.CloseElement();
+                builder.CloseElement();
+
+                if (duration > 0)
+                {
+                    builder.OpenElement(16, "div");
+                    builder.AddAttribute(17, "class", "info-item");
+                    builder.OpenElement(18, "span");
+                    builder.AddAttribute(19, "class", "info-label");
+                    builder.AddContent(20, "Duration:");
+                    builder.CloseElement();
+                    builder.OpenElement(21, "span");
+                    builder.AddAttribute(22, "class", "info-value");
+                    builder.AddContent(23, $"{duration} minutes");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(description))
+                {
+                    builder.OpenElement(24, "div");
+                    builder.AddAttribute(25, "class", "info-item");
+                    builder.OpenElement(26, "span");
+                    builder.AddAttribute(27, "class", "info-label");
+                    builder.AddContent(28, "Description:");
+                    builder.CloseElement();
+                    builder.OpenElement(29, "span");
+                    builder.AddAttribute(30, "class", "info-value");
+                    builder.AddContent(31, description);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+            }
+            else
+            {
+                builder.AddContent(0, "Item details were removed");
+            }
+        }
+        catch
+        {
+            builder.AddContent(0, "Item details were removed");
+        }
+    };
+
+    private string GetCreatedItemInfo(AuditLog log)
+    {
+        if (string.IsNullOrEmpty(log.NewValues))
+            return "No details available";
+
+        try
+        {
+            var data = System.Text.Json.JsonDocument.Parse(log.NewValues);
+            var root = data.RootElement;
+            
+            if (log.TableName == "Barbers")
+            {
+                var firstName = root.TryGetProperty("FirstName", out var fn) ? fn.GetString() : "";
+                var lastName = root.TryGetProperty("LastName", out var ln) ? ln.GetString() : "";
+                var email = root.TryGetProperty("Email", out var emailProp) ? emailProp.GetString() : "";
+                
+                return $@"
+                    <div class='info-item'>
+                        <span class='info-label'>Name:</span> 
+                        <span class='info-value'>{firstName} {lastName}</span>
+                    </div>
+                    <div class='info-item'>
+                        <span class='info-label'>Email:</span> 
+                        <span class='info-value'>{email}</span>
+                    </div>";
+            }
+            else if (log.TableName == "Services")
+            {
+                var serviceName = root.TryGetProperty("ServiceName", out var name) ? name.GetString() : "";
+                var price = root.TryGetProperty("Price", out var priceProp) ? priceProp.GetDecimal() : 0;
+                
+                return $@"
+                    <div class='info-item'>
+                        <span class='info-label'>Service:</span> 
+                        <span class='info-value'>{serviceName}</span>
+                    </div>
+                    <div class='info-item'>
+                        <span class='info-label'>Price:</span> 
+                        <span class='info-value'>${price:F2}</span>
+                    </div>";
+            }
+            
+            return "New item was added";
+        }
+        catch
+        {
+            return "New item was added";
+        }
+    }
+
+    private RenderFragment GetCreatedItemInfoList(AuditLog log) => builder =>
+    {
+        if (string.IsNullOrEmpty(log.NewValues))
+        {
+            builder.AddContent(0, "No details available");
+            return;
+        }
+
+        try
+        {
+            var data = System.Text.Json.JsonDocument.Parse(log.NewValues);
+            var root = data.RootElement;
+            
+            if (log.TableName == "Barbers")
+            {
+                var firstName = root.TryGetProperty("FirstName", out var fn) ? fn.GetString() : "";
+                var lastName = root.TryGetProperty("LastName", out var ln) ? ln.GetString() : "";
+                var email = root.TryGetProperty("Email", out var emailProp) ? emailProp.GetString() : "";
+                var phone = root.TryGetProperty("Phone", out var phoneProp) ? phoneProp.GetString() : "";
+                var isActive = root.TryGetProperty("IsActive", out var activeProp) ? activeProp.GetBoolean() : true;
+                var availabilityDays = root.TryGetProperty("AvailabilityDays", out var daysProp) ? daysProp.GetString() : "";
+                var availabilityStart = root.TryGetProperty("AvailabilityTimeStart", out var startProp) ? startProp.GetString() : "";
+                var availabilityEnd = root.TryGetProperty("AvailabilityTimeEnd", out var endProp) ? endProp.GetString() : "";
+
+                if (!string.IsNullOrEmpty(firstName) || !string.IsNullOrEmpty(lastName))
+                {
+                    builder.OpenElement(0, "div");
+                    builder.AddAttribute(1, "class", "info-item");
+                    builder.OpenElement(2, "span");
+                    builder.AddAttribute(3, "class", "info-label");
+                    builder.AddContent(4, "Full Name:");
+                    builder.CloseElement();
+                    builder.OpenElement(5, "span");
+                    builder.AddAttribute(6, "class", "info-value");
+                    builder.AddContent(7, $"{firstName} {lastName}");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(email))
+                {
+                    builder.OpenElement(8, "div");
+                    builder.AddAttribute(9, "class", "info-item");
+                    builder.OpenElement(10, "span");
+                    builder.AddAttribute(11, "class", "info-label");
+                    builder.AddContent(12, "Email:");
+                    builder.CloseElement();
+                    builder.OpenElement(13, "span");
+                    builder.AddAttribute(14, "class", "info-value");
+                    builder.AddContent(15, email);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(phone))
+                {
+                    builder.OpenElement(16, "div");
+                    builder.AddAttribute(17, "class", "info-item");
+                    builder.OpenElement(18, "span");
+                    builder.AddAttribute(19, "class", "info-label");
+                    builder.AddContent(20, "Phone:");
+                    builder.CloseElement();
+                    builder.OpenElement(21, "span");
+                    builder.AddAttribute(22, "class", "info-value");
+                    builder.AddContent(23, phone);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                builder.OpenElement(24, "div");
+                builder.AddAttribute(25, "class", "info-item");
+                builder.OpenElement(26, "span");
+                builder.AddAttribute(27, "class", "info-label");
+                builder.AddContent(28, "Status:");
+                builder.CloseElement();
+                builder.OpenElement(29, "span");
+                builder.AddAttribute(30, "class", "info-value");
+                builder.AddContent(31, isActive ? "Active" : "Inactive");
+                builder.CloseElement();
+                builder.CloseElement();
+
+                if (!string.IsNullOrEmpty(availabilityDays))
+                {
+                    builder.OpenElement(32, "div");
+                    builder.AddAttribute(33, "class", "info-item");
+                    builder.OpenElement(34, "span");
+                    builder.AddAttribute(35, "class", "info-label");
+                    builder.AddContent(36, "Working Days:");
+                    builder.CloseElement();
+                    builder.OpenElement(37, "span");
+                    builder.AddAttribute(38, "class", "info-value");
+                    builder.AddContent(39, FormatAvailabilityDays(availabilityDays));
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(availabilityStart) && !string.IsNullOrEmpty(availabilityEnd))
+                {
+                    builder.OpenElement(40, "div");
+                    builder.AddAttribute(41, "class", "info-item");
+                    builder.OpenElement(42, "span");
+                    builder.AddAttribute(43, "class", "info-label");
+                    builder.AddContent(44, "Working Hours:");
+                    builder.CloseElement();
+                    builder.OpenElement(45, "span");
+                    builder.AddAttribute(46, "class", "info-value");
+                    builder.AddContent(47, $"{FormatTime(availabilityStart)} - {FormatTime(availabilityEnd)}");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+            }
+            else if (log.TableName == "Services")
+            {
+                var serviceName = root.TryGetProperty("ServiceName", out var name) ? name.GetString() : "";
+                var price = root.TryGetProperty("Price", out var priceProp) ? priceProp.GetDecimal() : 0;
+                var duration = root.TryGetProperty("Duration", out var durationProp) ? durationProp.GetInt32() : 0;
+                var description = root.TryGetProperty("Description", out var descProp) ? descProp.GetString() : "";
+
+                if (!string.IsNullOrEmpty(serviceName))
+                {
+                    builder.OpenElement(0, "div");
+                    builder.AddAttribute(1, "class", "info-item");
+                    builder.OpenElement(2, "span");
+                    builder.AddAttribute(3, "class", "info-label");
+                    builder.AddContent(4, "Service Name:");
+                    builder.CloseElement();
+                    builder.OpenElement(5, "span");
+                    builder.AddAttribute(6, "class", "info-value");
+                    builder.AddContent(7, serviceName);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                builder.OpenElement(8, "div");
+                builder.AddAttribute(9, "class", "info-item");
+                builder.OpenElement(10, "span");
+                builder.AddAttribute(11, "class", "info-label");
+                builder.AddContent(12, "Price:");
+                builder.CloseElement();
+                builder.OpenElement(13, "span");
+                builder.AddAttribute(14, "class", "info-value");
+                builder.AddContent(15, $"${price:F2}");
+                builder.CloseElement();
+                builder.CloseElement();
+
+                if (duration > 0)
+                {
+                    builder.OpenElement(16, "div");
+                    builder.AddAttribute(17, "class", "info-item");
+                    builder.OpenElement(18, "span");
+                    builder.AddAttribute(19, "class", "info-label");
+                    builder.AddContent(20, "Duration:");
+                    builder.CloseElement();
+                    builder.OpenElement(21, "span");
+                    builder.AddAttribute(22, "class", "info-value");
+                    builder.AddContent(23, $"{duration} minutes");
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+
+                if (!string.IsNullOrEmpty(description))
+                {
+                    builder.OpenElement(24, "div");
+                    builder.AddAttribute(25, "class", "info-item");
+                    builder.OpenElement(26, "span");
+                    builder.AddAttribute(27, "class", "info-label");
+                    builder.AddContent(28, "Description:");
+                    builder.CloseElement();
+                    builder.OpenElement(29, "span");
+                    builder.AddAttribute(30, "class", "info-value");
+                    builder.AddContent(31, description);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+            }
+            else
+            {
+                builder.AddContent(0, "New item was added");
+            }
+        }
+        catch
+        {
+            builder.AddContent(0, "New item was added");
+        }
+    };
+
+    // Helper methods for formatting
+    private string FormatAvailabilityDays(string availabilityDays)
+    {
+        if (string.IsNullOrWhiteSpace(availabilityDays))
+            return "Not specified";
+
+        var days = availabilityDays.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(int.Parse)
+            .OrderBy(d => d)
+            .ToList();
+
+        if (!days.Any())
+            return "Not specified";
+
+        var dayNames = new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+        var selectedDays = days.Where(d => d >= 1 && d <= 7).Select(d => dayNames[d - 1]);
+        
+        return string.Join(", ", selectedDays);
+    }
+
+    private string FormatTime(string time)
+    {
+        if (string.IsNullOrWhiteSpace(time))
+            return "Not specified";
+
+        if (TimeOnly.TryParse(time, out var timeOnly))
+        {
+            return timeOnly.ToString("h:mm tt");
+        }
+        
+        return time;
+    }
+}

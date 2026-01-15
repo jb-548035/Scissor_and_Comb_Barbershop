@@ -1,0 +1,170 @@
+@page "/"
+@page "/login"
+@using hair.Components.Layout
+@using hair.Services
+@layout LoginLayout
+@inject NavigationManager Navigation
+@inject AuthenticationService AuthService
+@inject AuthStateService AuthStateService
+
+<div class="login-container">
+    <div class="login-wrapper">
+         <!-- Left Side - Gradient Background with Illustration -->
+        <div class="login-left">
+            <div class="illustration-container">
+                <div class="illustration-box">
+                    <div class="illustration-icon">
+                        <img src="images/logo.png" alt="Company Logo" class="logo-img" />
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Side - Login Form -->
+        <div class="login-right">
+            <div class="login-card">
+                <div class="login-header">
+                    <p class="login-subtitle">Log In</p>
+                    <p class="login-description">Enter your email and password to login our dashboard</p>
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="error-message">
+                        <i class="bi bi-exclamation-circle"></i>
+                        <span>@errorMessage</span>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <div class="success-message">
+                        <i class="bi bi-check-circle"></i>
+                        <span>@successMessage</span>
+                    </div>
+                }
+
+                <form class="login-form" @onsubmit="HandleLogin">
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email"
+                               id="email"
+                               class="form-input"
+                               placeholder="info@example.com"
+                               @bind="loginRequest.Email"
+                               required />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <div class="password-wrapper">
+                            <input type="@(showPassword ? "text" : "password")"
+                                   id="password"
+                                   class="form-input"
+                                   placeholder="Enter your password"
+                                   @bind="loginRequest.Password"
+                                   required />
+                            <button type="button"
+                                    class="toggle-password"
+                                    @onclick="TogglePasswordVisibility">
+                                <i class="bi @(showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-login" disabled="@isLoading">
+                        @if (isLoading)
+                        {
+                            <span class="spinner"></span>
+                            <span>Signing in...</span>
+                        }
+                        else
+                        {
+                            <span>Sign In</span>
+                        }
+                    </button>
+                </form>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginFormData loginRequest = new();
+    private bool showPassword = false;
+    private bool isLoading = false;
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private class LoginFormData
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool RememberMe { get; set; } = false;
+    }
+
+    private void TogglePasswordVisibility()
+    {
+        showPassword = !showPassword;
+    }
+
+    private async Task HandleLogin()
+    {
+        errorMessage = "";
+        successMessage = "";
+        isLoading = true;
+
+        try
+        {
+            // Attempt login
+            var (success, message, user) = await AuthService.LoginAsync(loginRequest.Email, loginRequest.Password);
+
+            if (success && user != null)
+            {
+                // Set current user in auth state
+                AuthStateService.SetCurrentUser(user);
+                
+                successMessage = message ?? "Login successful!";
+                await Task.Delay(500);
+                
+                // Check if user requires password change
+                if (user.RequiresPasswordChange)
+                {
+                    Navigation.NavigateTo("/change-password", true);
+                }
+                else
+                {
+                    // Navigate based on role
+                    if (user.Role == "Admin")
+                    {
+                        Navigation.NavigateTo("/dashboard", true);
+                    }
+                    else if (user.Role == "Cashier")
+                    {
+                        Navigation.NavigateTo("/walkin", true);
+                    }
+                    else
+                    {
+                        Navigation.NavigateTo("/login", true);
+                    }
+                }
+
+            }
+            else
+            {
+                errorMessage = message ?? "Login failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Login error: {ex.Message}");
+            errorMessage = "An error occurred during login";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

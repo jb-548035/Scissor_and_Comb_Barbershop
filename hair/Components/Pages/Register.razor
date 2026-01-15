@@ -1,0 +1,323 @@
+@page "/register"
+@using hair.Components.Layout
+@using hair.Services
+@layout LoginLayout
+@inject NavigationManager Navigation
+@inject AuthenticationService AuthService
+
+<RoleGuard AllowedRoles="@(new[] { "Admin" })">
+<div class="login-container">
+    <div class="login-wrapper-centered">
+        <!-- Register Form -->
+        <div class="login-right-full">
+            <div class="login-card">
+                <div class="login-header-with-back">
+                    <button class="btn-back" @onclick="GoBack">
+                        <i class="bi bi-arrow-left"></i>
+                        <span>Back</span>
+                    </button>
+                </div>
+                <div class="login-header">
+                    <p class="login-subtitle">Create Account</p>
+                    <p class="login-description">Create a cashier account</p>
+                    <p class="login-description" style="font-size: 12px; color: #6b7280; margin-top: 4px;">Only administrators can create cashier accounts</p>
+                </div>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="error-message">
+                        <i class="bi bi-exclamation-circle"></i>
+                        <span>@errorMessage</span>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(successMessage))
+                {
+                    <div class="success-message">
+                        <i class="bi bi-check-circle"></i>
+                        <span>@successMessage</span>
+                    </div>
+                }
+
+                <form class="login-form" @onsubmit="HandleRegister">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="firstName">First Name</label>
+                            <input type="text"
+                                   id="firstName"
+                                   class="form-input"
+                                   placeholder="John"
+                                   @bind="registerRequest.FirstName"
+                                   required />
+                        </div>
+
+                        <div class="form-group">
+                            <label for="lastName">Last Name</label>
+                            <input type="text"
+                                   id="lastName"
+                                   class="form-input"
+                                   placeholder="Doe"
+                                   @bind="registerRequest.LastName"
+                                   required />
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email"
+                               id="email"
+                               class="form-input"
+                               placeholder="info@example.com"
+                               @bind="registerRequest.Email"
+                               required />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="phone">Phone Number</label>
+                        <input type="tel"
+                               id="phone"
+                               class="form-input"
+                               placeholder="Enter phone number"
+                               @bind="registerRequest.Phone" />
+                    </div>
+
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <div class="password-wrapper">
+                            <input type="@(showPassword ? "text" : "password")"
+                                   id="password"
+                                   class="form-input"
+                                   placeholder="Enter your password"
+                                   @bind="registerRequest.Password"
+                                   @bind:event="oninput"
+                                   required />
+                            <button type="button"
+                                    class="toggle-password"
+                                    @onclick="ToggleCurrentPasswordVisibility">
+                                <i class="bi @(showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                            </button>
+                        </div>
+                        
+                        <!-- Password Strength Indicator -->
+                        @if (!string.IsNullOrEmpty(registerRequest.Password))
+                        {
+                            <div class="password-strength">
+                                <div class="strength-bar">
+                                    <div class="strength-fill @GetPasswordStrengthClass()" style="width: @GetPasswordStrengthPercentage()%"></div>
+                                </div>
+                                <p class="strength-text @GetPasswordStrengthClass()">
+                                    @GetPasswordStrengthMessage()
+                                </p>
+                            </div>
+                            
+                            <!-- Password Requirements - Hidden when Medium or Strong -->
+                            @if (GetPasswordStrengthClass() == "weak")
+                            {
+                                <div class="password-requirements">
+                                    <p class="requirement @(registerRequest.Password.Length >= 12 ? "met" : "unmet")">
+                                        <i class="bi @(registerRequest.Password.Length >= 12 ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                        At least 12 characters
+                                    </p>
+                                    <p class="requirement @(HasLetters(registerRequest.Password) ? "met" : "unmet")">
+                                        <i class="bi @(HasLetters(registerRequest.Password) ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                        Contains letters (a-z, A-Z)
+                                    </p>
+                                    <p class="requirement @(HasNumbers(registerRequest.Password) ? "met" : "unmet")">
+                                        <i class="bi @(HasNumbers(registerRequest.Password) ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                        Contains numbers (0-9)
+                                    </p>
+                                </div>
+                            }
+                        }
+                    </div>
+
+                    <div class="form-group">
+                        <label for="confirmPassword">Confirm Password</label>
+                        <div class="password-wrapper">
+                            <input type="@(showConfirmPassword ? "text" : "password")"
+                                   id="confirmPassword"
+                                   class="form-input"
+                                   placeholder="Confirm your password"
+                                   @bind="registerRequest.ConfirmPassword"
+                                   required />
+                            <button type="button"
+                                    class="toggle-password"
+                                    @onclick="ToggleConfirmPasswordVisibility">
+                                <i class="bi @(showConfirmPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-login" disabled="@isLoading">
+                        @if (isLoading)
+                        {
+                            <span class="spinner"></span>
+                            <span>Creating account...</span>
+                        }
+                        else
+                        {
+                            <span>Create Account</span>
+                        }
+                    </button>
+                </form>
+
+            </div>
+        </div>
+    </div>
+</div>
+</RoleGuard>
+
+@code {
+    private RegisterFormData registerRequest = new();
+    private bool showPassword = false;
+    private bool showConfirmPassword = false;
+    private bool isLoading = false;
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private class RegisterFormData
+    {
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string ConfirmPassword { get; set; } = "";
+    }
+
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/account");
+    }
+
+    private void ToggleCurrentPasswordVisibility()
+    {
+        showPassword = !showPassword;
+    }
+
+    private void ToggleConfirmPasswordVisibility()
+    {
+        showConfirmPassword = !showConfirmPassword;
+    }
+
+    // Password strength helper methods
+    private bool HasLetters(string password)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(password, @"[a-zA-Z]");
+    }
+
+    private bool HasNumbers(string password)
+    {
+        return System.Text.RegularExpressions.Regex.IsMatch(password, @"[0-9]");
+    }
+
+    private string GetPasswordStrengthClass()
+    {
+        if (string.IsNullOrEmpty(registerRequest.Password))
+            return "weak";
+
+        int length = registerRequest.Password.Length;
+        bool hasLetters = HasLetters(registerRequest.Password);
+        bool hasNumbers = HasNumbers(registerRequest.Password);
+
+        if (length < 12)
+            return "weak";
+        else if (length < 16 && hasLetters && hasNumbers)
+            return "medium";
+        else if (length >= 16 && hasLetters && hasNumbers)
+            return "strong";
+        else
+            return "weak";
+    }
+
+    private int GetPasswordStrengthPercentage()
+    {
+        if (string.IsNullOrEmpty(registerRequest.Password))
+            return 0;
+
+        int length = registerRequest.Password.Length;
+        bool hasLetters = HasLetters(registerRequest.Password);
+        bool hasNumbers = HasNumbers(registerRequest.Password);
+
+        if (length < 12)
+            return 33;
+        else if (length < 16 && hasLetters && hasNumbers)
+            return 66;
+        else if (length >= 16 && hasLetters && hasNumbers)
+            return 100;
+        else
+            return 33;
+    }
+
+    private string GetPasswordStrengthMessage()
+    {
+        if (string.IsNullOrEmpty(registerRequest.Password))
+            return "";
+
+        int length = registerRequest.Password.Length;
+        bool hasLetters = HasLetters(registerRequest.Password);
+        bool hasNumbers = HasNumbers(registerRequest.Password);
+
+        if (length < 12)
+            return "🔴 Weak - Not enough length";
+        else if (length < 16 && hasLetters && hasNumbers)
+            return "🟡 Medium - Meets minimum but not long";
+        else if (length >= 16 && hasLetters && hasNumbers)
+            return "🟢 Strong - Very strong password";
+        else
+            return "🔴 Weak - Missing requirements";
+    }
+
+    private async Task HandleRegister()
+    {
+        errorMessage = "";
+        successMessage = "";
+        isLoading = true;
+
+        try
+        {
+            // Validate passwords match
+            if (registerRequest.Password != registerRequest.ConfirmPassword)
+            {
+                errorMessage = "Passwords do not match";
+                isLoading = false;
+                return;
+            }
+
+            // Always create as Cashier
+            string roleName = "Cashier";
+
+            // Attempt registration
+            var (success, message, userId) = await AuthService.RegisterAsync(
+                registerRequest.FirstName,
+                registerRequest.LastName,
+                registerRequest.Email,
+                registerRequest.Phone,
+                roleName,
+                registerRequest.Password
+            );
+
+            if (success)
+            {
+                successMessage = "Cashier account created successfully! Redirecting to Account page...";
+                await Task.Delay(1500);
+                Navigation.NavigateTo("/account", true);
+            }
+            else
+            {
+                errorMessage = message ?? "Registration failed";
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Registration error: {ex.Message}");
+            errorMessage = "An error occurred during registration";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}

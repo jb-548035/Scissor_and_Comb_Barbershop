@@ -1,0 +1,28 @@
+@using hair.Services
+@inject AuthStateService AuthStateService
+@inject NavigationManager Navigation
+
+@if (AuthStateService.IsLoggedIn())
+{
+    @ChildContent
+}
+else
+{
+    <div style="padding: 20px; text-align: center;">
+        <p>You must be logged in to access this page.</p>
+        <p>Redirecting to login...</p>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public RenderFragment ChildContent { get; set; }
+
+    protected override void OnInitialized()
+    {
+        if (!AuthStateService.IsLoggedIn())
+        {
+            Navigation.NavigateTo("/login", true);
+        }
+    }
+}

@@ -1,0 +1,463 @@
+@page "/archive"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@using System.Diagnostics
+@layout MainLayout
+@inject NotificationService NotificationService
+
+<div class="archive-container">
+    <div class="archive-header">
+        <h1>Archive</h1>
+        <p>Manage deleted items and permanent records</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="archive-summary">
+        <div class="summary-card">
+            <h3>Total Archived Items</h3>
+            <p class="summary-value">@AllArchivedItems.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Barbers</h3>
+            <p class="summary-value">@ArchivedBarbers.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Services</h3>
+            <p class="summary-value">@ArchivedServices.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Accounts</h3>
+            <p class="summary-value">@ArchivedAccounts.Count</p>
+        </div>
+    </div>
+
+    <div class="archive-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search archived items..." @bind-value="SearchTerm" @bind-value:event="oninput" />
+        </div>
+    </div>
+
+    <!-- Type Filter Tabs -->
+    <div class="status-tabs">
+        <button class="tab-btn @(SelectedType == "All" ? "active" : "")" @onclick='() => SetTypeFilter("All")'>
+            All (@AllArchivedItems.Count)
+        </button>
+        <button class="tab-btn @(SelectedType == "Barbers" ? "active" : "")" @onclick='() => SetTypeFilter("Barbers")'>
+            Barbers (@ArchivedBarbers.Count)
+        </button>
+        <button class="tab-btn @(SelectedType == "Services" ? "active" : "")" @onclick='() => SetTypeFilter("Services")'>
+            Services (@ArchivedServices.Count)
+        </button>
+        <button class="tab-btn @(SelectedType == "Accounts" ? "active" : "")" @onclick='() => SetTypeFilter("Accounts")'>
+            Accounts (@ArchivedAccounts.Count)
+        </button>
+    </div>
+
+    <div class="archive-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Name</th>
+                    <th>Email/Phone</th>
+                    <th>Details</th>
+                    <th>Archived Date</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (FilteredArchivedItems.Any())
+                {
+                    @foreach (var item in FilteredArchivedItems)
+                    {
+                        <tr>
+                            <td>
+                                <span class="badge archived">@item.Type</span>
+                            </td>
+                            <td>
+                                <div class="item-info">
+                                    <div class="item-avatar">@GetInitials(item.Name)</div>
+                                    <div>
+                                        <div class="item-name">@item.Name</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>@(item.Type == "Barber" ? item.Email : item.Phone)</td>
+                            <td>@item.Details</td>
+                            <td>@item.ArchivedDate.ToString("MMM dd, yyyy")</td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn danger" title="Permanently Delete" @onclick="() => OpenConfirmPermanentDelete(item)">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="6" class="no-data">No archived items found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Permanent Delete Confirmation Modal -->
+    <AppModal IsOpen="@ShowConfirmPermanentDeleteModal" OnClose="CloseConfirmPermanentDeleteModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Permanent Delete</div>
+                <button class="icon-btn" @onclick="CloseConfirmPermanentDeleteModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ConfirmDeleteItem != null)
+                {
+                    <div style="color:#dc2626; font-size:14px; margin-bottom:12px;">
+                        <strong>⚠️ WARNING: This action cannot be undone!</strong>
+                    </div>
+                    <div style="color:#6b7280; font-size:14px;">
+                        Are you sure you want to permanently delete this @ConfirmDeleteItem.Type.ToLower()?
+                        <br><br>
+                        <strong>@ConfirmDeleteItem.Name</strong>
+                        @if (!string.IsNullOrEmpty(ConfirmDeleteItem.Email))
+                        {
+                            <text><br>Email: @ConfirmDeleteItem.Email</text>
+                        }
+                        @if (!string.IsNullOrEmpty(ConfirmDeleteItem.Phone))
+                        {
+                            <text><br>Phone: @ConfirmDeleteItem.Phone</text>
+                        }
+                        <br><br>
+                        This will remove all records and cannot be recovered.
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                <button class="btn-cancel" @onclick="CloseConfirmPermanentDeleteModal" type="button">Cancel</button>
+                <button class="btn-danger" @onclick="ConfirmPermanentDelete" type="button">Delete Forever</button>
+            </div>
+        </div>
+    </AppModal>
+</div>
+
+@code {
+    [Inject]
+    private NavigationManager Navigation { get; set; }
+
+    [Inject]
+    private AuthStateService AuthStateService { get; set; }
+
+    [Inject]
+    private HybridDatabaseService? _dbService { get; set; }
+
+    private List<ArchivedItem> AllArchivedItems = new();
+    private List<ArchivedItem> ArchivedBarbers = new();
+    private List<ArchivedItem> ArchivedServices = new();
+    private List<ArchivedItem> ArchivedAccounts = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+    private string SearchTerm = string.Empty;
+    private string SelectedType = "All";
+    private bool ShowConfirmPermanentDeleteModal = false;
+    private ArchivedItem? ConfirmDeleteItem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Check if user is Admin (case-insensitive)
+            var currentUser = AuthStateService.GetCurrentUser();
+            if (string.IsNullOrEmpty(currentUser?.Role) || 
+                !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                Navigation.NavigateTo("/dashboard", true);
+                return;
+            }
+
+            // Check if database service is available
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                return;
+            }
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load archived items
+            await LoadArchivedItems();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+        }
+    }
+
+    private async Task LoadArchivedItems()
+    {
+        try
+        {
+            if (_dbService == null) return;
+
+            // Load archived barbers (deactivated barbers)
+            var allBarbers = await _dbService.GetBarbersAsync();
+            ArchivedBarbers = allBarbers
+                .Where(b => !b.IsActive)
+                .Select(b => new ArchivedItem
+                {
+                    Id = b.BarberId,
+                    Type = "Barber",
+                    Name = $"{b.FirstName} {b.LastName}",
+                    Email = b.Email,
+                    Phone = b.Phone,
+                    Details = $"Availability: {FormatAvailabilityDays(b.AvailabilityDays)}, Time: {FormatTimeRange(b.AvailabilityTimeStart, b.AvailabilityTimeEnd)}",
+                    ArchivedDate = b.CreatedDate,
+                    OriginalData = b
+                })
+                .ToList();
+
+            // TODO: Load archived services and accounts when those features are implemented
+            ArchivedServices = new List<ArchivedItem>();
+            ArchivedAccounts = new List<ArchivedItem>();
+
+            // Combine all archived items
+            AllArchivedItems = new List<ArchivedItem>();
+            AllArchivedItems.AddRange(ArchivedBarbers);
+            AllArchivedItems.AddRange(ArchivedServices);
+            AllArchivedItems.AddRange(ArchivedAccounts);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading archived items: {ex.Message}";
+            System.Diagnostics.Debug.WriteLine($"[Archive] LoadArchivedItems error: {ex.Message}");
+        }
+    }
+
+    private IEnumerable<ArchivedItem> FilteredArchivedItems =>
+        SelectedType == "All" 
+            ? AllArchivedItems
+                .Where(item => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        item.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Phone.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Details.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            : SelectedType == "Barbers" 
+            ? ArchivedBarbers
+                .Where(item => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        item.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Phone.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Details.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            : SelectedType == "Services" 
+            ? ArchivedServices
+                .Where(item => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        item.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Phone.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Details.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            : SelectedType == "Accounts" 
+            ? ArchivedAccounts
+                .Where(item => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        item.Name.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Phone.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        item.Details.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            : AllArchivedItems
+                .OrderBy(item => item.Name);
+
+    private void SetTypeFilter(string type)
+    {
+        SelectedType = type;
+    }
+
+    // Permanent Delete Methods
+    private void OpenConfirmPermanentDelete(ArchivedItem item)
+    {
+        ConfirmDeleteItem = item;
+        ShowConfirmPermanentDeleteModal = true;
+    }
+
+    private void CloseConfirmPermanentDeleteModal()
+    {
+        ShowConfirmPermanentDeleteModal = false;
+        ConfirmDeleteItem = null;
+    }
+
+    private async Task ConfirmPermanentDelete()
+    {
+        if (ConfirmDeleteItem == null || _dbService == null)
+        {
+            CloseConfirmPermanentDeleteModal();
+            return;
+        }
+
+        try
+        {
+            bool ok = false;
+            
+            // Delete based on item type
+            if (ConfirmDeleteItem.Type == "Barber")
+            {
+                ok = await _dbService.DeleteBarberAsync(ConfirmDeleteItem.Id);
+            }
+            // TODO: Add delete methods for services and accounts when implemented
+            // else if (ConfirmDeleteItem.Type == "Service")
+            // {
+            //     ok = await _dbService.DeleteServiceAsync(ConfirmDeleteItem.Id);
+            // }
+            // else if (ConfirmDeleteItem.Type == "Account")
+            // {
+            //     ok = await _dbService.DeleteAccountAsync(ConfirmDeleteItem.Id);
+            // }
+
+            if (!ok)
+            {
+                NotificationService.ShowError($"Failed to permanently delete {ConfirmDeleteItem.Type.ToLower()}.");
+                return;
+            }
+
+            // Remove from appropriate list
+            if (ConfirmDeleteItem.Type == "Barber")
+            {
+                ArchivedBarbers.RemoveAll(item => item.Id == ConfirmDeleteItem.Id);
+            }
+            // TODO: Remove from other lists when implemented
+
+            // Remove from combined list
+            AllArchivedItems.RemoveAll(item => item.Id == ConfirmDeleteItem.Id);
+
+            NotificationService.ShowSuccess($"{ConfirmDeleteItem.Type} permanently deleted.");
+            CloseConfirmPermanentDeleteModal();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error deleting {ConfirmDeleteItem.Type.ToLower()}: {ex.Message}");
+        }
+    }
+
+    // Helper Methods
+    private static string GetInitials(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "??";
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return $"{parts.FirstOrDefault()?.FirstOrDefault()}{(parts.Length > 1 ? parts.LastOrDefault()?.FirstOrDefault() : "")}".ToUpper();
+    }
+
+    private static string FormatAvailabilityDays(string availabilityDays)
+    {
+        if (string.IsNullOrWhiteSpace(availabilityDays))
+            return "—";
+
+        var days = availabilityDays.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(int.Parse)
+            .OrderBy(d => d)
+            .ToList();
+
+        if (!days.Any())
+            return "—";
+
+        var ranges = new List<string>();
+        int start = days[0];
+        int prev = days[0];
+
+        for (int i = 1; i < days.Count; i++)
+        {
+            if (days[i] - prev > 1)
+            {
+                // Gap detected, add previous range
+                ranges.Add(start == prev ? DayLabel(start) : $"{DayLabel(start)}-{DayLabel(prev)}");
+                start = prev = days[i];
+            }
+            prev = days[i];
+        }
+        ranges.Add(start == prev ? DayLabel(start) : $"{DayLabel(start)}-{DayLabel(prev)}");
+
+        return string.Join(", ", ranges);
+    }
+
+    private static string DayLabel(int day)
+    {
+        return day switch
+        {
+            1 => "Mon",
+            2 => "Tue",
+            3 => "Wed",
+            4 => "Thu",
+            5 => "Fri",
+            6 => "Sat",
+            7 => "Sun",
+            _ => "??"
+        };
+    }
+
+    private static string FormatTimeRange(string start, string end)
+    {
+        if (string.IsNullOrWhiteSpace(start) || string.IsNullOrWhiteSpace(end))
+            return "—";
+        return $"{To12Hour(start)} - {To12Hour(end)}";
+    }
+
+    private static string To12Hour(string hhmm)
+    {
+        if (string.IsNullOrWhiteSpace(hhmm))
+            return "—";
+        
+        // Try parsing as TimeOnly first (HH:mm format)
+        if (TimeOnly.TryParse(hhmm, out var timeOnly))
+        {
+            return timeOnly.ToString("h:mmtt");
+        }
+        
+        // Fallback to TimeSpan parsing
+        if (TimeSpan.TryParse(hhmm, out var t))
+        {
+            var dt = DateTime.Today.Add(t);
+            return dt.ToString("h:mmtt");
+        }
+        
+        return hhmm;
+    }
+
+    // Archived Item Model
+    public class ArchivedItem
+    {
+        public int Id { get; set; }
+        public string Type { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Details { get; set; } = "";
+        public DateTime ArchivedDate { get; set; }
+        public object OriginalData { get; set; }
+    }
+}

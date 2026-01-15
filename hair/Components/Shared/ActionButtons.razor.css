@@ -1,0 +1,116 @@
+/* Consistent Action Buttons Styling */
+
+.icon-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.icon-btn {
+    padding: 6px 8px;
+    background: #f3f4f6;
+    color: #1f2937;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
+}
+
+.icon-btn:hover {
+    background: #e5e7eb;
+    transform: translateY(-1px);
+}
+
+.icon-btn.primary {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+
+.icon-btn.primary:hover {
+    background: #2563eb;
+    transform: translateY(-1px);
+}
+
+.icon-btn.success {
+    background: #10b981;
+    color: white;
+    border-color: #10b981;
+}
+
+.icon-btn.success:hover {
+    background: #059669;
+    transform: translateY(-1px);
+}
+
+.icon-btn.danger {
+    background: #ef4444;
+    color: white;
+    border-color: #ef4444;
+}
+
+.icon-btn.danger:hover {
+    background: #dc2626;
+    transform: translateY(-1px);
+}
+
+.icon-btn.warning {
+    background: #f59e0b;
+    color: white;
+    border-color: #f59e0b;
+}
+
+.icon-btn.warning:hover {
+    background: #d97706;
+    transform: translateY(-1px);
+}
+
+.icon-btn.disabled {
+    background: #f3f4f6;
+    color: #9ca3af;
+    border-color: #e5e7eb;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.icon-btn.disabled:hover {
+    background: #f3f4f6;
+    transform: none;
+    box-shadow: none;
+}
+
+.icon-btn i {
+    font-size: 14px;
+    line-height: 1;
+}
+
+/* Tooltip styling */
+.icon-btn[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.icon-btn[title]:hover::after {
+    opacity: 1;
+    bottom: calc(100% + 8px);
+}

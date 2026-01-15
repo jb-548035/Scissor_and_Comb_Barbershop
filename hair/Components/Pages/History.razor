@@ -1,0 +1,352 @@
+@page "/history"
+@using hair.Services
+@using hair.Components.Layout
+@using hair.Models
+@using System.Text
+@layout MainLayout
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject NotificationService NotificationService
+
+<div class="history-container">
+    <div class="history-header">
+        <h1>Transaction History</h1>
+        <p>View all customer transactions and booking history</p>
+    </div>
+
+    <NotificationArea />
+
+    <!-- KPI Cards at Top -->
+    <div class="history-summary">
+        <div class="summary-card">
+            <div class="summary-label">Total Transactions</div>
+            <div class="summary-value">@FilteredRecords.Count()</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Total Revenue</div>
+            <div class="summary-value">₱@FilteredRecords.Sum(r => r.TotalPrice).ToString("0.##")</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Total Deposits</div>
+            <div class="summary-value">₱@FilteredRecords.Sum(r => r.Deposit ?? 0).ToString("0.##")</div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="history-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search customer name or service..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+    </div>
+
+    <div class="history-tabs-container">
+        <div class="history-tabs">
+            <button class="tab-btn @(IsShowingAllDates ? "active" : "")" @onclick="ShowAllDates">All</button>
+            <div class="date-range-filter-inline">
+                <div class="filter-group-inline">
+                    <label>From:</label>
+                    <input type="date" class="form-input-inline" @bind="FilterFromDate" @bind:event="onchange" />
+                </div>
+                <div class="filter-group-inline">
+                    <label>To:</label>
+                    <input type="date" class="form-input-inline" @bind="FilterToDate" @bind:event="onchange" />
+                </div>
+                <button class="btn-reset-inline" @onclick="ApplyDateFilter">Apply</button>
+                <button class="btn-export" @onclick="ExportToPdf">
+                    <i class="bi bi-file-pdf"></i>
+                    Export
+                </button>
+            </div>
+        </div>
+        
+        <div class="pagination-filter">
+            <label>Show:</label>
+            <select @bind="ItemsPerPage" @bind:event="onchange">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="history-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Customer Name</th>
+                    <th>Service Type</th>
+                    <th>Barber</th>
+                    <th>Total Price (₱)</th>
+                    <th>Deposit (₱)</th>
+                    <th>Date & Time</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (PagedRecords.Any())
+                {
+                    @foreach (var item in PagedRecords)
+                    {
+                        <tr>
+                            <td>
+                                <div class="customer-info">
+                                    <div class="customer-avatar">@item.CustomerName.FirstOrDefault()</div>
+                                    <span>@item.CustomerName</span>
+                                </div>
+                            </td>
+                            <td>@item.ServiceType</td>
+                            <td>@item.BarberName</td>
+                            <td class="price">₱@item.TotalPrice.ToString("0.##")</td>
+                            <td class="price">₱@(item.Deposit?.ToString("0.##") ?? "0.00")</td>
+                            <td>@item.DateTime</td>
+                            <td>
+                                <span class="status-badge @GetStatusClass(item.PaymentStatus)">
+                                    @item.PaymentStatus
+                                </span>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="7" class="no-data">No records found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pagination">
+        <div>Showing @((PageIndex - 1) * ItemsPerPage + 1) - @(Math.Min(PageIndex * ItemsPerPage, FilteredRecords.Count())) of @FilteredRecords.Count()</div>
+        <div>
+            <button class="btn-pagination" @onclick="PrevPage" disabled="@(PageIndex==1)">← Prev</button>
+            <button class="btn-pagination" @onclick="NextPage" disabled="@(PageIndex*ItemsPerPage >= FilteredRecords.Count())">Next →</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private DatabaseService? _dbService;
+    private List<TransactionRecord> AllRecords = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+    private string SearchTerm = string.Empty;
+    private string SelectedStatus = string.Empty;
+
+    // Pagination and filtering
+    private int ItemsPerPage = 10;
+    private int PageIndex = 1;
+    private DateTime FilterFromDate = DateTime.Today;
+    private DateTime FilterToDate = DateTime.Today;
+    private bool IsShowingAllDates = true;
+
+    // Current logged-in user ID
+    private int CurrentUserId = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Initialize database service
+            _dbService = new DatabaseService(
+                serverName: "LAPTOP-0HPVJ4E1\\SQLEXPRESS",
+                databaseName: "db_hair",
+                userId: "",
+                password: ""
+            );
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load all records (both walk-in and bookings)
+            await LoadAllRecords();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+        }
+    }
+
+    private async Task LoadAllRecords()
+    {
+        try
+        {
+            AllRecords.Clear();
+
+            // Load walk-in transactions
+            var walkInTransactions = await _dbService.GetWalkInTransactionsAsync();
+            var services = await _dbService.GetServicesAsync();
+
+            foreach (var w in walkInTransactions)
+            {
+                var barberName = GetBarberName(w.BarberId);
+
+                AllRecords.Add(new TransactionRecord
+                {
+                    CustomerName = w.CustomerName,
+                    ServiceType = services.FirstOrDefault(s => s.ServiceId == w.ServiceId)?.ServiceName ?? "Unknown",
+                    BarberName = barberName,
+                    AddOns = "None",
+                    TotalPrice = (double)w.TotalAmount,
+                    Deposit = 0,
+                    DateTime = w.ServiceDate.ToString("MM/dd/yyyy hh:mm tt"),
+                    PaymentStatus = w.Status
+                });
+            }
+
+            // Load bookings from SharedData
+            foreach (var record in SharedData.Records)
+            {
+                AllRecords.Add(record);
+            }
+
+            // Sort by date descending
+            AllRecords = AllRecords.OrderByDescending(r => DateTime.ParseExact(r.DateTime, "MM/dd/yyyy hh:mm tt", null)).ToList();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading records: {ex.Message}";
+        }
+    }
+
+    // Check if date is in the selected filter range
+    private bool IsDateInFilter(DateTime date)
+    {
+        if (IsShowingAllDates)
+            return true;
+        
+        return date.Date >= FilterFromDate.Date && date.Date <= FilterToDate.Date;
+    }
+
+    private IEnumerable<TransactionRecord> FilteredRecords =>
+        AllRecords
+            .Where(r => r.PaymentStatus == "Paid")
+            .Where(r => IsDateInFilter(DateTime.ParseExact(r.DateTime, "MM/dd/yyyy hh:mm tt", null)))
+            .Where(r =>
+                string.IsNullOrWhiteSpace(SearchTerm) ||
+                r.CustomerName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                r.ServiceType.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase)
+            )
+            .OrderByDescending(r => DateTime.ParseExact(r.DateTime, "MM/dd/yyyy hh:mm tt", null));
+
+    private IEnumerable<TransactionRecord> PagedRecords =>
+        FilteredRecords
+            .Skip((PageIndex - 1) * ItemsPerPage)
+            .Take(ItemsPerPage);
+
+    private void ShowAllDates()
+    {
+        IsShowingAllDates = true;
+        PageIndex = 1;
+        NotificationService.ShowInfo("Showing all dates.", autoClearMs: 3000);
+    }
+
+    private void ApplyDateFilter()
+    {
+        IsShowingAllDates = false;
+        PageIndex = 1;
+        NotificationService.ShowInfo("Date filter applied.", autoClearMs: 3000);
+    }
+
+    private void PrevPage() { if (PageIndex > 1) PageIndex--; }
+    private void NextPage() { if (PageIndex * ItemsPerPage < FilteredRecords.Count()) PageIndex++; }
+
+    private string GetStatusClass(string status)
+    {
+        return status switch
+        {
+            "Paid" => "paid",
+            "Pending" => "pending",
+            "Cancelled" => "cancelled",
+            _ => "pending"
+        };
+    }
+
+    private string GetBarberName(int barberId)
+    {
+        return barberId switch
+        {
+            1 => "Barber 1",
+            2 => "Barber 2",
+            3 => "Barber 3",
+            _ => "Unknown"
+        };
+    }
+
+    private async Task ExportToPdf()
+    {
+        try
+        {
+            var recordsToExport = FilteredRecords.ToList();
+            
+            if (!recordsToExport.Any())
+            {
+                ErrorMessage = "No records to export. Please apply a filter first.";
+                SuccessMessage = string.Empty;
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            // Generate PDF content
+            var fileName = $"Transaction_History_{DateTime.Now:yyyyMMdd_HHmmss}.pdf";
+
+            var rows = recordsToExport.Select(r => new
+            {
+                customerName = r.CustomerName,
+                serviceType = r.ServiceType,
+                barberName = r.BarberName,
+                totalPrice = r.TotalPrice.ToString("0.##"),
+                deposit = (r.Deposit ?? 0).ToString("0.##"),
+                dateTime = r.DateTime,
+                status = r.PaymentStatus
+            }).ToList();
+
+            var meta = new
+            {
+                title = "TRANSACTION HISTORY REPORT",
+                generatedOn = DateTime.Now.ToString("MM/dd/yyyy hh:mm tt"),
+                dateRange = IsShowingAllDates ? "All Dates" : $"{FilterFromDate:MM/dd/yyyy} to {FilterToDate:MM/dd/yyyy}",
+                totalTransactions = recordsToExport.Count,
+                totalRevenue = recordsToExport.Sum(r => r.TotalPrice).ToString("0.##"),
+                totalDeposits = recordsToExport.Sum(r => r.Deposit ?? 0).ToString("0.##")
+            };
+
+            await JS.InvokeVoidAsync("exportHistoryPdf", fileName, rows, meta);
+
+            ErrorMessage = string.Empty;
+            SuccessMessage = $"✓ Report exported successfully! File: {fileName}";
+            NotificationService.ShowSuccess(SuccessMessage);
+            
+            // Clear success message after 5 seconds
+            await Task.Delay(5000);
+            SuccessMessage = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error exporting report: {ex.Message}";
+            SuccessMessage = string.Empty;
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+}

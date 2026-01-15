@@ -1,0 +1,533 @@
+@page "/account"
+@using hair.Components.Layout
+@using hair.Services
+@using hair.Models
+@layout MainLayout
+@inject NotificationService NotificationService
+
+<link rel="stylesheet" href="./Shared/ActionButtons.razor.css" />
+
+<div class="accounts-container">
+    <div class="accounts-header">
+        <h1>Accounts</h1>
+        <p>Manage user accounts - Admin and Cashier</p>
+    </div>
+
+    <NotificationArea />
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <div class="alert alert-error">
+            @ErrorMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(SuccessMessage))
+    {
+        <div class="alert alert-success">
+            @SuccessMessage
+        </div>
+    }
+
+    <div class="accounts-summary">
+        <div class="summary-card">
+            <h3>Total Users</h3>
+            <p class="summary-value">@AllUsers.Count</p>
+        </div>
+        <div class="summary-card">
+            <h3>Active Users</h3>
+            <p class="summary-value">@AllUsers.Count(u => u.IsLoggedIn)</p>
+        </div>
+        <div class="summary-card">
+            <h3>Inactive Users</h3>
+            <p class="summary-value">@AllUsers.Count(u => !u.IsLoggedIn)</p>
+        </div>
+    </div>
+
+    <div class="accounts-toolbar">
+        <div class="search-box">
+            <i class="bi bi-search"></i>
+            <input type="text" placeholder="Search staff..." @bind="SearchTerm" @bind:event="oninput" />
+        </div>
+        <button class="btn-add-cashier" @onclick="NavigateToRegister">
+            <i class="bi bi-plus-circle"></i>
+            Add Cashier
+        </button>
+    </div>
+
+    <!-- Status Filter Tabs -->
+    <div class="role-tabs">
+        <button class="tab-btn @(SelectedStatus == "All" ? "active" : "")" @onclick='() => SetStatusFilter("All")'>
+            All (@AllUsers.Count)
+        </button>
+        <button class="tab-btn @(SelectedStatus == "Active" ? "active" : "")" @onclick='() => SetStatusFilter("Active")'>
+            Active (@AllUsers.Count(u => u.IsLoggedIn))
+        </button>
+        <button class="tab-btn @(SelectedStatus == "Inactive" ? "active" : "")" @onclick='() => SetStatusFilter("Inactive")'>
+            Inactive (@AllUsers.Count(u => !u.IsLoggedIn))
+        </button>
+    </div>
+
+    <!-- Edit User Form -->
+    @if (ShowEditForm && EditingUser != null)
+    {
+        <AppModal IsOpen="@ShowEditForm" OnClose="CloseEditForm">
+            <div class="form-card">
+                <div class="form-header">
+                    <h2>Edit User Status</h2>
+                    <button class="close-btn" @onclick="CloseEditForm">&times;</button>
+                </div>
+
+                <div class="form-content">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" class="form-input" value="@EditingUser.FullName" readonly />
+                        </div>
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" class="form-input" value="@EditingUser.Email" readonly />
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Role</label>
+                            <input type="text" class="form-input" value="@EditingUser.Role" readonly />
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select class="form-input" @bind="EditingUserStatus">
+                                <option value="true">Active</option>
+                                <option value="false">Inactive</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button class="btn-save" @onclick="SaveUserStatus">Save Changes</button>
+                        <button class="btn-cancel" @onclick="CloseEditForm">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </AppModal>
+    }
+
+    <AppModal IsOpen="@ShowViewUserModal" OnClose="CloseViewUserModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">User Details</div>
+                <button class="icon-btn" @onclick="CloseViewUserModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ViewingUser != null)
+                {
+                    <div class="detail-grid">
+                        <div class="detail-item">
+                            <div class="detail-item__label">Name</div>
+                            <div class="detail-item__value">@ViewingUser.FullName</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Role</div>
+                            <div class="detail-item__value">@ViewingUser.Role</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Email</div>
+                            <div class="detail-item__value">@ViewingUser.Email</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Phone</div>
+                            <div class="detail-item__value">@ViewingUser.Phone</div>
+                        </div>
+                        <div class="detail-item">
+                            <div class="detail-item__label">Status</div>
+                            <div class="detail-item__value">@(ViewingUser.IsLoggedIn ? "Active" : "Inactive")</div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                @if (ViewingUser != null)
+                {
+                    <button class="btn-cancel" @onclick="CloseViewUserModal" type="button">Close</button>
+                    <button class="btn-save" @onclick="() => EditFromView(ViewingUser)" type="button">Edit Status</button>
+                }
+            </div>
+        </div>
+    </AppModal>
+
+    <AppModal IsOpen="@ShowConfirmUserStatusModal" OnClose="CloseConfirmUserStatusModal">
+        <div class="action-modal">
+            <div class="action-modal__header">
+                <div class="action-modal__title">Confirm Action</div>
+                <button class="icon-btn" @onclick="CloseConfirmUserStatusModal" type="button" title="Close">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+
+            <div class="action-modal__body">
+                @if (ConfirmUser != null)
+                {
+                    <div style="color:#6b7280; font-size:14px;">
+                        Are you sure you want to @(ConfirmUser.IsLoggedIn ? "deactivate" : "activate")
+                        <strong>@ConfirmUser.FullName</strong>?
+                    </div>
+                }
+            </div>
+
+            <div class="action-modal__footer">
+                <button class="btn-cancel" @onclick="CloseConfirmUserStatusModal" type="button">Cancel</button>
+                <button class="btn-save" @onclick="ConfirmToggleUserStatus" type="button">Confirm</button>
+            </div>
+        </div>
+    </AppModal>
+    <div class="accounts-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (FilteredUsers.Any())
+                {
+                    @foreach (var user in FilteredUsers)
+                    {
+                        <tr>
+                            <td>
+                                <div class="account-info">
+                                    <div class="account-avatar">@GetInitials(user.FirstName, user.LastName)</div>
+                                    <div>
+                                        <div class="account-name">@user.FirstName @user.LastName</div>
+                                        <div class="account-type">@user.Role</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>@user.Email</td>
+                            <td>@user.Phone</td>
+                            <td>
+                                <span class="role-badge @GetRoleClass(user.Role)">@user.Role</span>
+                            </td>
+                            <td>
+                                <span class="badge @(user.IsLoggedIn ? "active" : "inactive")">
+                                    @(user.IsLoggedIn ? "Active" : "Inactive")
+                                </span>
+                            </td>
+                            <td>
+                                <div class="icon-actions">
+                                    <button type="button" class="icon-btn primary" title="View" @onclick="() => OpenViewUser(user)">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    @if (CanEditAdminUser() || !user.Role.Equals("Admin", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        <button type="button" class="icon-btn" title="Edit" @onclick="() => EditUser(user)">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button type="button" class="icon-btn danger" title="@(user.IsLoggedIn ? "Deactivate" : "Activate")" @onclick="() => OpenConfirmUserStatus(user)">
+                                            <i class="bi @(user.IsLoggedIn ? "bi-trash" : "bi-arrow-clockwise")"></i>
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="icon-btn disabled" title="Admin account - restricted" disabled>
+                                            <i class="bi bi-lock"></i>
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="6" class="no-data">No staff members found</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    [Inject]
+    private NavigationManager Navigation { get; set; }
+
+    [Inject]
+    private AuthStateService AuthStateService { get; set; }
+
+    [Inject]
+    private HybridDatabaseService? _dbService { get; set; }
+
+    [Inject]
+    private AuthenticationService? _authService { get; set; }
+
+    private void NavigateToRegister()
+    {
+        Navigation.NavigateTo("/register");
+    }
+    private List<hair.Services.UserInfo> AllUsers = new();
+    private string ErrorMessage = string.Empty;
+    private string SuccessMessage = string.Empty;
+    private string SearchTerm = string.Empty;
+    private string SelectedStatus = "All";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Check if user is Admin (case-insensitive)
+            var currentUser = AuthStateService.GetCurrentUser();
+            if (string.IsNullOrEmpty(currentUser?.Role) || 
+                !currentUser.Role.Trim().Equals("Admin", StringComparison.OrdinalIgnoreCase))
+            {
+                Navigation.NavigateTo("/dashboard", true);
+                return;
+            }
+
+            // Check if database service is available
+            if (_dbService == null || _authService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                return;
+            }
+
+            // Test connection
+            bool isConnected = await _dbService.TestConnectionAsync();
+            if (!isConnected)
+            {
+                ErrorMessage = "Failed to connect to database. Please check your connection settings.";
+                return;
+            }
+
+            // Load all users from database
+            await LoadUsers();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error initializing: {ex.Message}";
+        }
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            if (_dbService == null) return;
+
+            if (_authService == null) return;
+            
+            // Load users from database using the injected AuthenticationService
+            AllUsers = await _authService.GetAllUsersAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading users: {ex.Message}";
+        }
+    }
+
+    private IEnumerable<hair.Services.UserInfo> FilteredUsers =>
+        AllUsers
+            .Where(u => SelectedStatus == "All" || 
+                       (SelectedStatus == "Active" && u.IsLoggedIn) ||
+                       (SelectedStatus == "Inactive" && !u.IsLoggedIn))
+            .Where(u => string.IsNullOrWhiteSpace(SearchTerm) || 
+                        u.FirstName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        u.LastName.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        u.Email.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase) ||
+                        u.Role.Contains(SearchTerm, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(u => u.Role == "Admin" ? 0 : 1)
+            .ThenBy(u => u.FirstName);
+
+    private void SetStatusFilter(string status)
+    {
+        SelectedStatus = status;
+    }
+
+    private string GetInitials(string firstName, string lastName)
+    {
+        return $"{firstName.FirstOrDefault()}{lastName.FirstOrDefault()}".ToUpper();
+    }
+
+    private string GetRoleClass(string role)
+    {
+        return role switch
+        {
+            "Admin" => "admin",
+            "Cashier" => "cashier",
+            "Barber" => "barber",
+            _ => "default"
+        };
+    }
+
+    private bool CanEditAdminUser()
+    {
+        var currentUser = AuthStateService.GetCurrentUser();
+        return currentUser?.Role.Equals("Developer", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    // Edit user status
+    private bool ShowEditForm = false;
+    private hair.Services.UserInfo EditingUser = null;
+    private string EditingUserStatus = "true";
+
+    private bool ShowViewUserModal = false;
+    private hair.Services.UserInfo? ViewingUser;
+
+    private bool ShowConfirmUserStatusModal = false;
+    private hair.Services.UserInfo? ConfirmUser;
+
+    private void EditUser(hair.Services.UserInfo user)
+    {
+        // Check if user is trying to edit an admin account
+        var currentUser = AuthStateService.GetCurrentUser();
+        if (user.Role.Equals("Admin", StringComparison.OrdinalIgnoreCase) && 
+            !currentUser?.Role.Equals("Developer", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            NotificationService.ShowError("You do not have permission to edit administrator accounts. Only developers can modify admin accounts.");
+            return;
+        }
+
+        EditingUser = user;
+        EditingUserStatus = user.IsLoggedIn ? "true" : "false";
+        ShowEditForm = true;
+        ErrorMessage = string.Empty;
+        SuccessMessage = string.Empty;
+
+        NotificationService.ShowInfo($"Editing user: {user.FirstName} {user.LastName}");
+    }
+
+    private void OpenViewUser(hair.Services.UserInfo user)
+    {
+        ViewingUser = user;
+        ShowViewUserModal = true;
+    }
+
+    private void CloseViewUserModal()
+    {
+        ShowViewUserModal = false;
+        ViewingUser = null;
+    }
+
+    private void EditFromView(hair.Services.UserInfo user)
+    {
+        CloseViewUserModal();
+        EditUser(user);
+    }
+
+    private void OpenConfirmUserStatus(hair.Services.UserInfo user)
+    {
+        ConfirmUser = user;
+        ShowConfirmUserStatusModal = true;
+    }
+
+    private void CloseConfirmUserStatusModal()
+    {
+        ShowConfirmUserStatusModal = false;
+        ConfirmUser = null;
+    }
+
+    private async Task ConfirmToggleUserStatus()
+    {
+        if (ConfirmUser == null || _dbService == null)
+        {
+            CloseConfirmUserStatusModal();
+            return;
+        }
+
+        // Check if user is trying to change admin account status
+        var currentUser = AuthStateService.GetCurrentUser();
+        if (ConfirmUser.Role.Equals("Admin", StringComparison.OrdinalIgnoreCase) && 
+            !currentUser?.Role.Equals("Developer", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            NotificationService.ShowError("You do not have permission to change administrator account status. Only developers can modify admin accounts.");
+            CloseConfirmUserStatusModal();
+            return;
+        }
+
+        try
+        {
+            var changedBy = currentUser?.UserId;
+            bool newStatus = !ConfirmUser.IsLoggedIn;
+
+            var ok = await _dbService.UpdateUserActiveStatusAsync(ConfirmUser.UserId, newStatus, changedBy);
+            if (!ok)
+            {
+                NotificationService.ShowError("Failed to update user status.");
+                return;
+            }
+
+            await LoadUsers();
+            NotificationService.ShowSuccess("User status updated.");
+            CloseConfirmUserStatusModal();
+        }
+        catch (Exception ex)
+        {
+            NotificationService.ShowError($"Error updating user status: {ex.Message}");
+        }
+    }
+
+    private void CloseEditForm()
+    {
+        ShowEditForm = false;
+        EditingUser = null;
+        EditingUserStatus = "true";
+    }
+
+    private async Task SaveUserStatus()
+    {
+        if (EditingUser == null) return;
+
+        // Check if user is trying to save changes to an admin account
+        var currentUser = AuthStateService.GetCurrentUser();
+        if (EditingUser.Role.Equals("Admin", StringComparison.OrdinalIgnoreCase) && 
+            !currentUser?.Role.Equals("Developer", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            NotificationService.ShowError("You do not have permission to modify administrator accounts. Only developers can modify admin accounts.");
+            return;
+        }
+
+        try
+        {
+            bool newStatus = EditingUserStatus == "true";
+
+            if (_dbService == null)
+            {
+                ErrorMessage = "Database service not available. Please try again later.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            var changedBy = currentUser?.UserId;
+
+            var ok = await _dbService.UpdateUserActiveStatusAsync(EditingUser.UserId, newStatus, changedBy);
+            if (!ok)
+            {
+                ErrorMessage = "Failed to update user status. Please try again.";
+                NotificationService.ShowError(ErrorMessage);
+                return;
+            }
+
+            SuccessMessage = $"User status updated successfully! {EditingUser.FirstName} is now {(newStatus ? "Active" : "Inactive")}.";
+            NotificationService.ShowSuccess(SuccessMessage);
+            
+            // Reload users
+            await LoadUsers();
+            CloseEditForm();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error updating user status: {ex.Message}";
+            NotificationService.ShowError(ErrorMessage);
+        }
+    }
+}
