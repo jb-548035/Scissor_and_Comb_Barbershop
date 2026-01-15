@@ -1,1 +1,1 @@
-# hair
+# Scissor & Comb Barbershop
